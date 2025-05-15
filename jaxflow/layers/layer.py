@@ -42,7 +42,7 @@ class Layer(abc.ABC):
         The mask argument is provided to allow for selective propagation of information.
         """
         pass
-
+    
     def __call__(self, inputs, training=False, mask=None):
         if not self.built:
             inferred_shape = self._infer_input_shape(inputs)

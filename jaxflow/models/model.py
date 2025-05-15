@@ -3,6 +3,8 @@ import jax.numpy as jnp
 from jax import value_and_grad
 from jax.tree_util import tree_map
 from jaxflow.layers.layer import Layer
+from tqdm import tqdm
+import math
 
 class Model(Layer):
     """
@@ -53,13 +55,22 @@ class Model(Layer):
         self.built = True
         self.built_shape = input_shape
 
-    def call(self, inputs, training=False, mask=None):
-        if self.layers:
-            x = inputs
-            for layer in self.layers:
-                x = layer(x, training=training, mask=mask)
-            return x
-        raise NotImplementedError("Custom model must override call() or add layers via add().")
+        def _scanned_forward(x, training, mask):
+            # body_fn: (carry, layer) -> (new_carry, nothing)
+            def body_fn(carry, layer):
+                out = layer(carry, training=training, mask=mask)
+                return out, None
+            # lax.scan over the tuple of layers:
+            final, _ = jax.lax.scan(body_fn, x, tuple(self.layers))
+            return final
+
+        # 2) JIT it, marking the booleans as static so they don’t get traced every call:
+        #    static_argnums=(1,2) means “treat training and mask as compile-time constants”
+        self._forward_fn = jax.jit(_scanned_forward, static_argnums=(1,2))
+
+    def call(self, inputs, training=False, mask=None):        
+
+        return self._forward_fn(inputs, training, mask)
 
     def get_params(self):
         """
@@ -93,14 +104,25 @@ class Model(Layer):
         self.metrics = metrics
         params = self.get_params()
         self.optimizer.init(params)
+
+
+        self.compute_gradients_jit = jax.jit(self.compute_gradients)
+
+        
+
+
         self.compiled = True
+
+
+
 
     def train_step(self, x, y, sample_weight=None, mask=None):
         """
         Execute one training step using the custom optimizer.
         This stateful version sets model parameters via side effects.
         """
-        loss_val,params, grads = self.compute_gradients(x, y, sample_weight=sample_weight, mask=mask)
+        params = self.get_params()
+        loss_val,params, grads = self.compute_gradients_jit(x, y, params,sample_weight=sample_weight, mask=mask)
         self.update_parameters(params, grads, optimizer=self.optimizer)
         return loss_val
 
@@ -143,7 +165,7 @@ class Model(Layer):
         self.set_params(new_params)
         return new_params
 
-    def compute_gradients(self, x, y, loss_fn=None, sample_weight=None, mask=None):
+    def compute_gradients(self, x, y, params,loss_fn=None, sample_weight=None, mask=None):
         """
         Compute and return the loss and gradients of the model with respect to its parameters,
         using a pure function that does not mutate the model state.
@@ -166,39 +188,175 @@ class Model(Layer):
             preds = self(x, training=True)
             return effective_loss_fn(y, preds, sample_weight=sample_weight, mask=mask)
 
-        params = self.get_params()
         loss_val, grads = jax.value_and_grad(loss_wrapper)(params, x, y, sample_weight, mask)
         return loss_val,params , grads
 
-    def evaluate(self, x, y, batch_size=32, sample_weight=None, mask=None):
-        num_samples = x.shape[0]
-        steps = num_samples // batch_size
-        total_loss = 0.0
-        for step in range(steps):
-            batch_x = x[step * batch_size:(step + 1) * batch_size]
-            batch_y = y[step * batch_size:(step + 1) * batch_size]
-            preds = self(batch_x, training=False)
-            loss_val = self.loss_fn(batch_y, preds, sample_weight=sample_weight, mask=mask)
-            total_loss += loss_val
-        return total_loss / steps
+    
+    def train_epoch(self, x, y,
+                    batch_size=32,
+                    sample_weight=None,
+                    mask=None,
+                    verbose=1):
+        """Run a single training epoch and return a dict of average metrics."""
+        num_samples     = x.shape[0]
+        steps_per_epoch = max(1, math.ceil(num_samples / batch_size))
 
-    def predict(self, x, batch_size=32):
-        return self(x, training=False)
+        running_loss    = 0.0
+        running_metrics = {m.name: 0.0 for m in self.metrics}
 
-    def fit(self, x, y, epochs=1, batch_size=32, verbose=1, sample_weight=None, mask=None, validation_data=None):
-        num_samples = x.shape[0]
-        steps_per_epoch = num_samples // batch_size
-        for epoch in range(epochs):
-            epoch_loss = 0.0
-            for step in range(steps_per_epoch):
-                batch_x = x[step * batch_size:(step + 1) * batch_size]
-                batch_y = y[step * batch_size:(step + 1) * batch_size]
-                loss_val = self.train_step(batch_x, batch_y, sample_weight=sample_weight, mask=mask)
-                epoch_loss += loss_val
-            epoch_loss /= steps_per_epoch
+        bar = None
+        if verbose:
+            bar = tqdm(total=steps_per_epoch,
+                       desc="Training",
+                       unit="step",
+                       bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}] • {postfix}")
+
+        for step in range(steps_per_epoch):
+            start = step * batch_size
+            end   = min(start + batch_size, num_samples)
+            xb, yb = x[start:end], y[start:end]
+
+            # forward + backward + step
+            loss_val = self.train_step(xb, yb,
+                                       sample_weight=sample_weight,
+                                       mask=mask)
+            running_loss += float(loss_val)
+
+            # compute any additional metrics
+            preds = self.predict(xb)
+            for m in self.metrics:
+                running_metrics[m.name] += float(m(yb, preds))
+
             if verbose:
-                print(f"Epoch {epoch+1}/{epochs} - Loss: {epoch_loss:.4f}")
-        return
+                avg_loss = running_loss / (step + 1)
+                postfix = {"loss": f"{avg_loss:.4f}"}
+                for name in running_metrics:
+                    postfix[name] = f"{running_metrics[name]/(step+1):.4f}"
+                
+                bar.update(1)
+                bar.set_postfix(postfix)
+
+        if verbose:
+            bar.close()
+
+        # assemble averages
+        results = {"loss": running_loss / steps_per_epoch}
+        results.update({name: running_metrics[name] / steps_per_epoch
+                        for name in running_metrics})
+        return results
+
+    def evaluate(self, x, y,
+                 batch_size=32,
+                 sample_weight=None,
+                 mask=None,
+                 verbose=0):
+        """
+        Compute loss and metrics over the dataset.
+        If verbose=1, show a tqdm bar with per‐batch loss.
+        """
+        num_samples = x.shape[0]
+        steps       = max(1, math.ceil(num_samples / batch_size))
+
+        total_loss    = 0.0
+        total_metrics = {m.name: 0.0 for m in self.metrics}
+
+        bar = None
+        if verbose:
+            bar = tqdm(
+                total=steps,
+                desc="Evaluating",
+                unit="step",
+                bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}] • {postfix}"
+            )
+
+        for step in range(steps):
+            start = step * batch_size
+            end   = min(start + batch_size, num_samples)
+            xb, yb = x[start:end], y[start:end]
+
+            preds    = self.predict(xb)
+            loss_val = self.loss_fn(
+                yb, preds,
+                sample_weight=sample_weight,
+                mask=mask
+            )
+            total_loss += float(loss_val)
+
+            # accumulate metrics
+            batch_postfix = {"loss": f"{loss_val:.4f}"}
+            for m in self.metrics:
+                m_val = float(m(yb, preds))
+                total_metrics[m.name] += m_val
+                batch_postfix[m.name] = f"{m_val:.4f}"
+
+            if verbose:
+                bar.update(1)
+                bar.set_postfix(batch_postfix)
+
+        if verbose:
+            bar.close()
+
+        # compute averages
+        results = {"loss": total_loss / steps}
+        results.update({name: total_metrics[name] / steps
+                        for name in total_metrics})
+        return results
+
+    def fit(self, x, y,
+            epochs=1,
+            batch_size=32,
+            sample_weight=None,
+            mask=None,
+            validation_data=None,
+            verbose=1):
+        history = {"loss": [], **{m.name: [] for m in self.metrics}}
+        if validation_data:
+            history.update({f"val_{k}": [] for k in history})
+
+        for epoch in range(1, epochs + 1):
+            print(f"Epoch {epoch}/{epochs}")
+            train_res = self.train_epoch(x, y,
+                                         batch_size=batch_size,
+                                         sample_weight=sample_weight,
+                                         mask=mask,
+                                         verbose=verbose)
+            # record training
+            for k, v in train_res.items():
+                history[k].append(v)
+
+            # validation
+            if validation_data:
+                x_val, y_val = validation_data
+                val_res = self.evaluate(x_val, y_val,
+                                        batch_size=batch_size,
+                                        sample_weight=sample_weight,
+                                        mask=mask,
+                                        verbose=verbose)
+                for k, v in val_res.items():
+                    history[f"val_{k}"].append(v)
+
+                # print a combined summary line
+                metrics_str = " - ".join([
+                    f"{k}: {train_res[k]:.4f}" for k in train_res
+                ] + [
+                    f"val_{k}: {val_res[k]:.4f}" for k in val_res
+                ])
+                print(f"{metrics_str}")
+            else:
+                # no validation, just print training metrics
+                metrics_str = " - ".join([
+                    f"{k}: {train_res[k]:.4f}" for k in train_res
+                ])
+                print(metrics_str)
+
+        return history
+           
+    
+
+    def predict(self, x, mask=None):
+        return self(x, training=False, mask=mask)
+
+
 
     def summary(self):
         print("Model Summary:")
