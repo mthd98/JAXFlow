@@ -238,7 +238,7 @@ class Variable:
             device_str = str(self._single_device)
         return (f"<jaxflow.Variable '{name_str}' shape={self.shape} dtype={self.dtype}, "
                 f"device={device_str}, numpy=\n{full_value}>")
-
+"""
 # Example usage:
 if __name__ == "__main__":
     # Option A: Single device variable (automatically selects GPU/TPU/CPU)
@@ -271,3 +271,4 @@ if __name__ == "__main__":
     else:
         print("\nNo suitable CPU devices found or shape mismatch for list-based sharding.")
 
+"""
