@@ -64,10 +64,3 @@ class Flatten(Layer):
     def __repr__(self):
         return f"<Flatten built={self.built}, output_shape={getattr(self, 'output_shape_', None)}>"
 
-
-# test 
-flatten = Flatten()
-flatten.build((None, 3, 5))
-x = jnp.ones((2, 3, 5))
-flatten(x).shape
-
