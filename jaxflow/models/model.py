@@ -376,6 +376,18 @@ class Model(Layer):
         params  = self.get_params()
         pr      = jax.device_put_replicated(params, devices)
         return pmap(self._batched_forward, in_axes=(0, None))(Xs, False)
+    
+
+    def __setattr__(self, name, value):
+        """Auto-register every Layer assigned as an attribute.
+
+        Works only *after* self.layers has been created (i.e. after __init__).  
+        Sequential-style `self.add(layer)` still works; duplicates are ignored.
+        """
+        super().__setattr__(name, value)                     # normal assignment first
+        if isinstance(value, Layer) and 'layers' in self.__dict__:
+            if value not in self.layers:
+                self.layers.append(value)
 
     # ------------------------------------------------------------------ #
     # Misc.
