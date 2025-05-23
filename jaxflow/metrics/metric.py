@@ -9,15 +9,16 @@ import jax.numpy as jnp
 
 from jaxflow.core.variable import Variable
 from jaxflow.initializers import Zeros
+from jaxflow.core.auto_name import AutoNameMixin
 
-class Metric:
+class Metric(AutoNameMixin):
     """
     Base Metric class. Subclass to implement custom metrics by overriding
     update_state() and result(). State variables created via add_variable().
     """
     def __init__(self, name: Optional[str] = None, dtype: Any = None):
         # Required attributes
-        self.name = name or self.__class__.__name__.lower()
+        self.name = self.auto_name(name)
         self.dtype = dtype or jnp.float32
         self._variables: List[Variable] = []
         # Marker to verify super init call

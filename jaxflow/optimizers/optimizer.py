@@ -1,200 +1,223 @@
+# jaxflow/optimizers/base_optimizer.py
+# --------------------------------------------------
 import jax
 import jax.numpy as jnp
 import optax
 from abc import ABC, abstractmethod
+from typing import Any, Dict, Tuple, Optional
+from jaxflow.core.auto_name import AutoNameMixin
 
-class BaseOptimizer(ABC):
+class BaseOptimizer(AutoNameMixin,ABC):
     """
-    Abstract base for JAXFlow optimizers, wrapping Optax transforms with advanced features.
+    Framework-level wrapper around Optax that adds clipping, weight-decay,
+    grad-accumulation, loss-scaling, and EMA.
 
-    This base class:
-      - Builds an Optax `GradientTransformation` pipeline including:
-        • gradient clipping (global or per-leaf),
-        • decoupled weight decay,
-        • a user-specified base optimizer (e.g., Adam, SGD).
-      - Supports optional:
-        • loss scaling (for mixed precision),
-        • gradient accumulation over multiple steps,
-        • exponential moving average (EMA) of parameters.
+    NEW (2025-05-23)
+    ----------------
+    • update() now returns **(new_params, new_state)** rather than (updates, …).
+      That means caller code never has to call `optax.apply_updates` itself.
 
-    Parameters
+    Public API
     ----------
-    learning_rate : float
-        Base step size for the underlying optimizer.
-    weight_decay : float, default=0.0
-        Decoupled L2 regularization factor applied after gradients.
-    clipnorm : float or None, default=None
-        Per-parameter clipping threshold (L2 norm). Mutually exclusive with `global_clipnorm`.
-    global_clipnorm : float or None, default=None
-        Global clipping threshold (L2 norm across the whole gradient PyTree).
-    loss_scale : float or None, default=None
-        Scale factor applied to loss (and unscaled back) for mixed-precision stability.
-    accumulate_steps : int or None, default=None
-        Number of steps over which to accumulate gradients before applying an update.
-    use_ema : bool, default=False
-        Whether to maintain an exponential moving average of parameters.
-    ema_decay : float, default=0.999
-        Decay rate for EMA updates.
-    ema_every : int or None, default=None
-        Apply EMA-swapped parameters back into the model every `ema_every` steps.
-    **kwargs
-        Additional keyword arguments forwarded to the underlying Optax constructor.
-
-    Attributes
-    ----------
-    learning_rate : float
-    weight_decay : float
-    clipnorm : float or None
-    global_clipnorm : float or None
-    loss_scale : float or None
-    accumulate_steps : int or None
-    use_ema : bool
-    ema_decay : float
-    ema_every : int or None
-    config : dict
-        Extra optimizer-specific config passed via `**kwargs`.
-    opt_transform : optax.GradientTransformation
-        The chained Optax transformation pipeline.
-
-    Methods
-    -------
-    _build_optax()
-        Internal: construct `opt_transform` from the clip, decay, and base-optimizer transforms.
-    _create_optax_transform(learning_rate, **config) -> optax.GradientTransformation
-        Abstract: override to return the base Optax optimizer (e.g., `optax.adam`).
-    init(params)
-        Initialize the optimizer state, optional accumulators, and EMA buffers.
-    update(params, grads, opt_state, accum_grads, ema_params, step)
-        Apply one (or deferred) gradient update, returning new params, states, and EMA.
-    get_config() -> dict
-        Return a JSON-serializable dict of all hyperparameters for checkpointing.
+    init(params)                 -> state
+    update(grads, state, params) -> (new_params, new_state)
+    get_ema_params(state)        -> params | None
+    get_step(state)              -> int
+    reset_accumulation(state,
+                        params)  -> state
     """
+
+    # -------------------------------------------------- #
+    # Construction
+    # -------------------------------------------------- #
     def __init__(
         self,
         learning_rate: float,
+        *,
         weight_decay: float = 0.0,
-        clipnorm: float = None,
-        global_clipnorm: float = None,
-        loss_scale: float = None,
-        accumulate_steps: int = None,
+        clipnorm: float | None = None,
+        global_clipnorm: float | None = None,
+        loss_scale: float | None = None,
+        accumulate_steps: int | None = None,
         use_ema: bool = False,
         ema_decay: float = 0.999,
-        ema_every: int = None,
+        ema_every: int | None = None,
+        
         **kwargs,
     ):
-        # Hyperparameters
-        self.learning_rate = learning_rate
-        self.weight_decay = weight_decay
-        self.clipnorm = clipnorm
+        # Hyper-parameters
+        self.learning_rate   = learning_rate
+        self.weight_decay    = weight_decay
+        self.clipnorm        = clipnorm
         self.global_clipnorm = global_clipnorm
-        self.loss_scale = loss_scale
+        self.loss_scale      = loss_scale
         self.accumulate_steps = accumulate_steps
-        self.use_ema = use_ema
-        self.ema_decay = ema_decay
-        self.ema_every = ema_every
-        self.config = kwargs
+        self.use_ema         = use_ema
+        self.ema_decay       = ema_decay
+        self.ema_every       = ema_every
+        self.config          = kwargs
 
-        # Build core optax transform
+        # Build the core Optax pipeline once
         self._build_optax()
 
+    # -------------------------------------------------- #
+    # Optax transform builder
+    # -------------------------------------------------- #
     def _build_optax(self):
-        transforms = []
-        # Clipping
+        txs: list[optax.GradientTransformation] = []
+
+        # 1) Gradient clipping
         if self.global_clipnorm is not None:
-            transforms.append(optax.clip_by_global_norm(self.global_clipnorm))
+            txs.append(optax.clip_by_global_norm(self.global_clipnorm))
         elif self.clipnorm is not None:
-            transforms.append(optax.clip(self.clipnorm))
-        # Decoupled weight decay
-        if self.weight_decay and self.weight_decay > 0:
-            transforms.append(optax.add_decayed_weights(self.weight_decay))
-        # Base optimizer
-        base = self._create_optax_transform(self.learning_rate, **self.config)
-        transforms.append(base)
-        # Chain
-        self.opt_transform = optax.chain(*transforms)
+            txs.append(optax.clip(self.clipnorm))
 
+        # 2) Decoupled weight decay
+        if self.weight_decay and self.weight_decay > 0.0:
+            txs.append(optax.add_decayed_weights(self.weight_decay))
+
+        # 3) Base optimizer (provided by subclass)
+        base_tx = self._create_optax_transform(self.learning_rate, **self.config)
+        txs.append(base_tx)
+
+        # Final chain
+        self.opt_transform: optax.GradientTransformation = optax.chain(*txs)
+
+    # -------------------------------------------------- #
+    # Must-override: create the base transform (Adam, SGD…)
+    # -------------------------------------------------- #
     @abstractmethod
-    def _create_optax_transform(self, learning_rate: float, **config) -> optax.GradientTransformation:
-        """
-        Return an optax.GradientTransformation, e.g., optax.adam, optax.sgd.
-        """
-        pass
+    def _create_optax_transform(
+        self, learning_rate: float, **config
+    ) -> optax.GradientTransformation:
+        ...
 
-    def init(self, params):
-        """
-        Initialize optimizer state and optional accumulators.
+    # -------------------------------------------------- #
+    # Interface used by Model / training loop
+    # -------------------------------------------------- #
+    def init(self, params) -> Dict[str, Any]:
+        """Return a state-dict compatible with `update`."""
+        state = {
+            "optax_state": self.opt_transform.init(params),
+            "step": 0,
+        }
 
-        Args:
-          params: PyTree of model parameters.
-
-        Returns:
-          (opt_state, accum_grads, ema_params, step)
-        """
-        opt_state = self.opt_transform.init(params)
-        accum_grads = None
         if self.accumulate_steps and self.accumulate_steps > 1:
-            accum_grads = jax.tree_map(jnp.zeros_like, params)
-        ema_params = None
-        if self.use_ema:
-            ema_params = params
-        step = 0
-        return opt_state, accum_grads, ema_params, step
+            state["accum_grads"] = jax.tree_map(jnp.zeros_like, params)
 
+        if self.use_ema:
+            state["ema_params"] = params
+
+        return state
+
+    # -------------------------------------------------- #
+    # Core update step  (returns **new_params**!)
+    # -------------------------------------------------- #
     def update(
         self,
-        params,
         grads,
-        opt_state,
-        accum_grads,
-        ema_params,
-        step,
-    ):
+        opt_state: Dict[str, Any],
+        params,
+    ) -> Tuple[Any, Dict[str, Any]]:
         """
-        Pure-functionally apply gradients: compute new params, new opt_state,
-        updated accum_grads and ema_params, and increment step.
+        Args
+        ----
+        grads      : PyTree of gradients
+        opt_state  : state‐dict previously returned by `init` / `update`
+        params     : current model parameters
 
-        Returns:
-          new_params, new_opt_state, new_accum_grads, new_ema_params, new_step, loss
+        Returns
+        -------
+        (new_params, new_state)
         """
-        # Loss scaling
-        if self.loss_scale:
+        step = opt_state["step"] + 1
+        optax_state = opt_state["optax_state"]
+
+        # ---- loss scaling (mixed precision) ---------------------------
+        if self.loss_scale is not None:
             grads = jax.tree_map(lambda g: g / self.loss_scale, grads)
-        new_step = step + 1
-        # Accumulation
-        if self.accumulate_steps and self.accumulate_steps > 1:
-            accum_grads = jax.tree_map(lambda a, g: a + g, accum_grads, grads)
-            if new_step % self.accumulate_steps != 0:
-                # no update yet; return same params
-                return params, opt_state, accum_grads, ema_params, new_step, None
-            # average
-            grads = jax.tree_map(lambda a: a / self.accumulate_steps, accum_grads)
-            # reset
-            accum_grads = jax.tree_map(jnp.zeros_like, accum_grads)
-        # Optax update
-        updates, new_opt_state = self.opt_transform.update(grads, opt_state, params)
-        new_params = optax.apply_updates(params, updates)
-        # EMA
-        if self.use_ema:
-            ema_params = jax.tree_map(
-                lambda e, p: self.ema_decay * e + (1 - self.ema_decay) * p,
-                ema_params, new_params
-            )
-            if self.ema_every and new_step % self.ema_every == 0:
-                new_params = ema_params
-        # Return
-        return new_params, new_opt_state, accum_grads, ema_params, new_step, None
 
-    def get_config(self):
+        # ---- gradient accumulation ------------------------------------
+        if self.accumulate_steps and self.accumulate_steps > 1:
+            acc = opt_state["accum_grads"]
+            acc = jax.tree_map(lambda a, g: a + g, acc, grads)
+
+            # Not time to apply yet → just store and exit
+            if step % self.accumulate_steps != 0:
+                new_state = {
+                    **opt_state,
+                    "step": step,
+                    "accum_grads": acc,
+                }
+                return params, new_state  # params unchanged
+
+            # Time to update → average & reset accumulator
+            grads = jax.tree_map(lambda a: a / self.accumulate_steps, acc)
+            reset_acc = jax.tree_map(jnp.zeros_like, acc)
+        # ----------------------------------------------------------------
+
+        # ---- optax update ---------------------------------------------
+        updates, new_optax_state = self.opt_transform.update(
+            grads, optax_state, params
+        )
+        new_params = optax.apply_updates(params, updates)
+        # ----------------------------------------------------------------
+
+        # ---- build new state dict -------------------------------------
+        new_state = {
+            "optax_state": new_optax_state,
+            "step": step,
+        }
+
+        if self.accumulate_steps and self.accumulate_steps > 1:
+            new_state["accum_grads"] = reset_acc
+
+        # ---- EMA maintenance ------------------------------------------
+        if self.use_ema:
+            ema_params = opt_state["ema_params"]
+            new_ema = jax.tree_map(
+                lambda e, p: self.ema_decay * e + (1.0 - self.ema_decay) * p,
+                ema_params,
+                new_params,
+            )
+            new_state["ema_params"] = new_ema
+
+            # Optional parameter swap every `ema_every` steps
+            if self.ema_every and step % self.ema_every == 0:
+                new_params = new_ema  # do the swap
+
+        return new_params, new_state
+
+    # -------------------------------------------------- #
+    # Convenience helpers
+    # -------------------------------------------------- #
+    def get_ema_params(self, state: Dict[str, Any]) -> Optional[Any]:
+        return state.get("ema_params") if self.use_ema else None
+
+    def get_step(self, state: Dict[str, Any]) -> int:
+        return state["step"]
+
+    def reset_accumulation(self, state: Dict[str, Any], params) -> Dict[str, Any]:
+        if not (self.accumulate_steps and self.accumulate_steps > 1):
+            return state
+        new_state = state.copy()
+        new_state["accum_grads"] = jax.tree_map(jnp.zeros_like, params)
+        return new_state
+
+    # -------------------------------------------------- #
+    # (De)serialisation
+    # -------------------------------------------------- #
+    def get_config(self) -> Dict[str, Any]:
         cfg = {
-            'learning_rate': self.learning_rate,
-            'weight_decay': self.weight_decay,
-            'clipnorm': self.clipnorm,
-            'global_clipnorm': self.global_clipnorm,
-            'loss_scale': self.loss_scale,
-            'accumulate_steps': self.accumulate_steps,
-            'use_ema': self.use_ema,
-            'ema_decay': self.ema_decay,
-            'ema_every': self.ema_every,
+            "learning_rate": self.learning_rate,
+            "weight_decay": self.weight_decay,
+            "clipnorm": self.clipnorm,
+            "global_clipnorm": self.global_clipnorm,
+            "loss_scale": self.loss_scale,
+            "accumulate_steps": self.accumulate_steps,
+            "use_ema": self.use_ema,
+            "ema_decay": self.ema_decay,
+            "ema_every": self.ema_every,
         }
         cfg.update(self.config)
         return cfg

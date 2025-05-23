@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+from jaxflow.core.auto_name import AutoNameMixin
 
 # Metaclass to intercept instantiation keyword arguments for Loss.
 class LossMeta(type):
@@ -15,7 +16,7 @@ class LossMeta(type):
         Loss.__init__(instance, **loss_params)
         return instance
 
-class Loss(metaclass=LossMeta):
+class Loss(AutoNameMixin,metaclass=LossMeta):
     """
     Base class for loss functions in a JAX/Optax workflow.
 
@@ -115,7 +116,7 @@ class Loss(metaclass=LossMeta):
         return Loss._reduce_values(values, sample_weight, reduction, dtype=dtype)
 
     def __init__(self, name=None, reduction="sum_over_batch_size", dtype=jnp.float32):
-        self.name = name or self.__class__.__name__
+        self.name = self.auto_name(name)
         self.reduction = Loss._standardize_reduction(reduction)
         self.dtype = dtype
 

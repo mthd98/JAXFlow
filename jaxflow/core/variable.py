@@ -1,8 +1,9 @@
 import jax
 import jax.numpy as jnp
 from jax.sharding import PartitionSpec as P, NamedSharding
+from jaxflow.core.auto_name import AutoNameMixin
 
-class Variable:
+class Variable(AutoNameMixin):
     def __init__(self,
                  initial_value=None,
                  trainable=True,
@@ -47,7 +48,7 @@ class Variable:
             raise ValueError(f"Provided shape {shape} does not match initial value shape {initial_value.shape}")
 
         self.trainable = trainable
-        self.name = name
+        self.name = self.auto_name(name)
         self.variable_def = variable_def
         self.shape = initial_value.shape
         self.dtype = initial_value.dtype

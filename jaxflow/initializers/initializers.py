@@ -28,8 +28,9 @@ from jax.nn.initializers import (
     zeros,
 )
 
+from jaxflow.core.auto_name import AutoNameMixin
 
-class Initializer(abc.ABC):
+class Initializer(AutoNameMixin,abc.ABC):
     """
     A base class for initializers.
 
@@ -43,7 +44,7 @@ class Initializer(abc.ABC):
             seed = pyrandom.randint(0, 2**32 - 1)
         self.key = random.PRNGKey(seed)
         self.dtype = dtype
-        self.name = name if name is not None else self.__class__.__name__
+        self.name = self.auto_name(name)
 
     @abc.abstractmethod
     def __call__(self, shape):
