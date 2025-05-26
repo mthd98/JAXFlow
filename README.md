@@ -9,36 +9,48 @@
 [![Coverage Status](https://img.shields.io/codecov/c/github/mthd98/JAXFlow)](https://codecov.io/gh/mthd98/JAXFlow)
 
 
+---
 
-# JAXFlow
+# JAXFlow: A JAX-based Deep Learning and Machine Learning  Framework
 
-A lightweight neural-network library built on [JAX](https://github.com/google/jax)
-– pure-functional, multi-device-ready, and flexible enough for both research and production.
+**JAXFlow** is a modern, lightweight neural network library built on top of [JAX](https://github.com/google/jax). It is a **pure-functional**, multi-device-ready, and modular **deep learning framework** designed for research, experimentation, and production-ready machine learning pipelines.
+
+> If you're searching for a fast, flexible, and fully-JAX-compatible framework for building neural networks, JAXFlow is designed for you.
 
 ---
 
-## 🚀 Features
+## 🚀 Why JAXFlow?
 
-> Built from scratch with ❤️ and powered by [JAX](https://github.com/google/jax), JAXFlow began as a deep dive into how libraries like Keras and scikit-learn work under the hood—and evolved into a full-featured framework for high-performance deep learning and machine learning.
+> JAXFlow is not just another wrapper around JAX—it's a ground-up, PyTree-aware system for creating, training, and deploying high-performance deep learning models with minimal overhead and full control.
 
-* **Modular Model API**
-  Build networks using `Sequential`, subclassed `Model`s, or pure-layer stacks.
-* **Multi-Device Execution**
-  Fully compatible with `jit`, `vmap`, `pmap`, and `pjit` via PyTree-aware design.
-* **Layer Collection**
-  `Dense`, `Conv`, `BatchNorm`, `Dropout`, `Flatten`, `Embedding`, and custom `Layer` subclasses.
-* **Train-Eval Pipelines**
-  `model.compile()` + `fit()` for simplicity, or write your own training loop for advanced control.
-* **Optimizers & Schedulers**
-  Integrated with [Optax](https://github.com/deepmind/optax), supports SGD, Adam, RMSProp, and more.
-* **Losses & Metrics**
-  MSE, CrossEntropy, F1Score, Precision, Recall, Accuracy, etc. via streaming metric classes.
-* **Callbacks & Checkpoints**
-  EarlyStopping, ModelCheckpoint, LearningRateScheduler, and Orbax-powered save/load.
-* **Pre-built Models**
-  Includes `ResNet`, `MLP`, `Transformer`, and composable `Block`s.
-* **Lazy Imports**
-  Top-level `jaxflow` is fast to import; deep components load on demand.
+### 🔑 Key Features
+
+* ✅ **Modular Model API**
+  Define networks using `Sequential`, subclassed `Model`s, or flexible functional blocks.
+
+* 🦮 **JAX-Compatible Execution**
+  Built from the ground up to support `jit`, `vmap`, `pmap`, `pjit`, and full PyTree semantics.
+
+* 🗺 **Rich Layer Library**
+  Includes `Dense`, `Conv`, `BatchNorm`, `Embedding`, `Dropout`, and custom `Layer` classes.
+
+* 🏋️ **Training API**
+  Use `.compile()` + `.fit()` or write custom training loops for full control.
+
+* ⚙️ **Optimizers & Schedulers**
+  Built-in integration with [Optax](https://github.com/deepmind/optax).
+
+* 📊 **Losses & Streaming Metrics**
+  Includes `CrossEntropy`, `MSE`, `Accuracy`, `F1`, `Precision`, and more.
+
+* 📂 **Callbacks & Checkpoints**
+  Support for EarlyStopping, LearningRateScheduler, and Orbax save/load.
+
+* 🧠 **Built-in Models**
+  Comes with ready-to-use `ResNet`, `MLP`, `Transformer`, and composable blocks.
+
+* ⚡ **Lazy Imports**
+  Fast to import, loading deep components only when needed.
 
 ---
 
@@ -48,30 +60,28 @@ A lightweight neural-network library built on [JAX](https://github.com/google/ja
 pip install jaxflow
 ```
 
-> Note:
->
-> Requires JAX with CPU/GPU/TPU support.
->
-> ```bash
-> pip install "jax[cuda]>=0.6.0" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
-> ```
->
-> Or simply use:
->
-> ```bash
-> pip install --upgrade jaxflow[GPU]   # for CUDA support
-> pip install --upgrade jaxflow[tpu]   # for TPU support
-> ```
+Requires Python ≥3.9 and a valid JAX installation.
 
-Python ≥3.9 required.
+To install JAX with GPU or TPU support:
+
+```bash
+pip install "jax[cuda]>=0.6.0" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+```
+
+Or use:
+
+```bash
+pip install --upgrade jaxflow[GPU]
+pip install --upgrade jaxflow[TPU]
+```
 
 ---
 
-## 🎉 Quickstart
+## 🧑‍💻 Quickstart: Build Your First JAXFlow Model
 
-JAXFlow models can be defined in two main styles:
+JAXFlow supports two modeling styles: subclassing and sequential-style.
 
-### 1. Subclassing `Model`
+### 1. Subclassing a Model
 
 ```python
 import jaxflow as jf
@@ -80,47 +90,40 @@ from jaxflow.layers import Conv2D, MaxPooling2D, Dense
 from jaxflow.initializers import GlorotUniform, Zeros
 
 class CNN(Model):
-    def __init__(self, num_classes: int = 10, name: str = "MyCNN"):
-        super().__init__(name=name)
-        self.conv1 = Conv2D(filters=32, kernel_size=(3,3), activation=jf.activations.relu, kernel_initializer=GlorotUniform, bias_initializer=Zeros, padding='SAME')
-        self.pool1 = MaxPooling2D(pool_size=(2,2))
-        self.conv2 = Conv2D(filters=64, kernel_size=(3,3), activation=jf.activations.relu, kernel_initializer=GlorotUniform, bias_initializer=Zeros, padding='SAME')
-        self.pool2 = MaxPooling2D(pool_size=(2,2))
+    def __init__(self, num_classes: int = 10):
+        super().__init__()
+        self.conv1 = Conv2D(32, (3, 3), activation=jf.activations.relu)
+        self.pool1 = MaxPooling2D((2, 2))
+        self.conv2 = Conv2D(64, (3, 3), activation=jf.activations.relu)
+        self.pool2 = MaxPooling2D((2, 2))
         self.flatten = jf.layers.GlobalAveragePooling2D()
-        self.dense1 = Dense(units=64, activation=jf.activations.relu, kernel_initializer=GlorotUniform, bias_initializer=Zeros)
-        self.outputs = Dense(units=num_classes, activation=jf.activations.softmax, kernel_initializer=GlorotUniform, bias_initializer=Zeros)
+        self.dense1 = Dense(64, activation=jf.activations.relu)
+        self.outputs = Dense(num_classes, activation=jf.activations.softmax)
 
-    def call(self, inputs, training: bool = False):
+    def call(self, inputs, training=False):
         x = self.conv1(inputs, training=training)
-        x = self.pool1(x, training=training)
+        x = self.pool1(x)
         x = self.conv2(x, training=training)
-        x = self.pool2(x, training=training)
+        x = self.pool2(x)
         x = self.flatten(x)
         x = self.dense1(x, training=training)
         return self.outputs(x, training=training)
 ```
 
-### 2. Using the `.add()` Method (Sequential-style API)
+### 2. Sequential API with .add()
 
 ```python
-import jaxflow as jf
-from jaxflow.models import Model
-from jaxflow.layers import Conv2D, MaxPooling2D, Dense
-from jaxflow.initializers import GlorotUniform, Zeros
-from jaxflow.optimizers import Adam
-from jaxflow.losses import SparseCategoricalCrossentropy
-
-model = Model()
-model.add(Conv2D(filters=32, kernel_size=(3,3), activation=jf.activations.relu, kernel_initializer=GlorotUniform, bias_initializer=Zeros, padding='SAME'))
-model.add(MaxPooling2D(pool_size=(2,2)))
-model.add(Conv2D(filters=64, kernel_size=(3,3), activation=jf.activations.relu, kernel_initializer=GlorotUniform, bias_initializer=Zeros, padding='SAME'))
-model.add(MaxPooling2D(pool_size=(2,2)))
+model = jf.models.Model()
+model.add(jf.layers.Conv2D(32, (3, 3), activation=jf.activations.relu))
+model.add(jf.layers.MaxPooling2D((2, 2)))
+model.add(jf.layers.Conv2D(64, (3, 3), activation=jf.activations.relu))
+model.add(jf.layers.MaxPooling2D((2, 2)))
 model.add(jf.layers.GlobalAveragePooling2D())
-model.add(Dense(units=64, activation=jf.activations.relu, kernel_initializer=GlorotUniform, bias_initializer=Zeros))
-model.add(Dense(units=10, activation=jf.activations.softmax, kernel_initializer=GlorotUniform, bias_initializer=Zeros))
+model.add(jf.layers.Dense(64, activation=jf.activations.relu))
+model.add(jf.layers.Dense(10, activation=jf.activations.softmax))
 
 model.build(input_shape=(None, 28, 28, 1))
-model.compile(optimizer=Adam(0.001), loss_fn=SparseCategoricalCrossentropy())
+model.compile(optimizer=jf.optimizers.Adam(0.001), loss_fn=jf.losses.SparseCategoricalCrossentropy())
 model.fit(x_train, y_train, epochs=5, batch_size=64, validation_split=0.1)
 ```
 
@@ -128,48 +131,48 @@ model.fit(x_train, y_train, epochs=5, batch_size=64, validation_split=0.1)
 
 ## 📖 Documentation
 
-Whether you're exploring JAX, need scalable training tools, or just love building things—check it out and let us know what you think!
+Full documentation and API reference available:
 
-* 🔗 GitHub: [github.com/mthd98/JAXFlow](https://github.com/mthd98/JAXFlow)
-
-* 📦 PyPI: [pypi.org/project/jaxflow](https://pypi.org/project/jaxflow/)
-
-* 📘 [API Reference](https://mthd98.github.io/JAXFlow/)
-
+* 🌐 [GitHub Repo](https://github.com/mthd98/JAXFlow)
+* 📘 [API Docs](https://mthd98.github.io/JAXFlow/)
+* 📦 [PyPI Package](https://pypi.org/project/jaxflow/)
 
 ---
 
-## 🛠️ Structure
+## 🗂️ Project Structure
 
 ```
 jaxflow/
-├── core/           # Variable management, RNG scopes
-├── gradient/       # Autograd and custom gradients
-├── activations/    # relu, gelu, swiglu, ...
-├── initializers/   # he_normal, glorot_uniform, ...
-├── layers/         # Conv2D, Dense, LayerNorm, ...
-├── losses/         # mse, cross_entropy, ...
-├── optimizers/     # Optax integration
-├── callbacks/      # EarlyStopping, Logger, Checkpointing
-├── metrics/        # Precision, Recall, Accuracy, ...
-├── models/         # Sequential, ResNet, Transformer
-└── regularizers/   # Dropout, L2, ...
+├── activations/       # ReLU, GELU, Swish, etc.
+├── callbacks/         # EarlyStopping, Logger, Checkpointing
+├── core/              # Base module, scopes, tree utilities
+├── gradient/          # JAX custom grad support
+├── initializers/      # Glorot, He, Zeros, ...
+├── layers/            # Dense, Conv2D, Embedding, ...
+├── losses/            # CrossEntropy, MSE, ...
+├── metrics/           # Accuracy, F1, Precision, ...
+├── models/            # Sequential, Transformer, ResNet
+├── optimizers/        # Optax integrations
+└── regularizers/      # L1, L2, Dropout
 ```
 
 ---
 
-## 🚧 Coming Soon
+## 🔮 What’s Next
 
-* Transformer layer with attention
-* Callback system (EarlyStopping, ModelCheckpoint, etc.)
-* Model saving/loading
-* Classical ML models (SVM, Logistic Regression, KNN, Random Forest)
+Planned additions to JAXFlow:
+
+* ☑️ Transformer layer with attention support
+* ☑️ Full callback system with exportable training logs
+* ☑️ Model persistence and loading with Orbax
+* ☑️ Classical ML algorithms: SVM, KNN, Logistic Regression
+
 ---
 
 ## 📄 License
 
-JAXFlow is distributed under the Apache-2.0 License. See `LICENSE` for full details.
+JAXFlow is licensed under the Apache-2.0 License.
 
----
+💖 Built with care for the JAX community. Keep your models clean, fast, and functional—with JAXFlow.
 
-> With JAXFlow, keep your research code clean, fast, and scalable.
+jaxflow, jax deep learning, jax neural network library, jax model framework, python deep learning, neural network in jax, jaxflow documentation, jaxflow github, functional deep learning, modular jax library
