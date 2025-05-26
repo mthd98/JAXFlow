@@ -7,25 +7,78 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, Tuple, Optional
 from jaxflow.core.auto_name import AutoNameMixin
 
-class BaseOptimizer(AutoNameMixin,ABC):
+class BaseOptimizer(AutoNameMixin, ABC):
     """
-    Framework-level wrapper around Optax that adds clipping, weight-decay,
-    grad-accumulation, loss-scaling, and EMA.
+    Base optimizer for JAXFlow.
 
-    NEW (2025-05-23)
-    ----------------
-    • update() now returns **(new_params, new_state)** rather than (updates, …).
-      That means caller code never has to call `optax.apply_updates` itself.
+    A flexible, extensible Optax-based optimizer wrapper providing advanced features
+    such as gradient clipping, decoupled weight decay, gradient accumulation,
+    mixed-precision loss scaling, and Exponential Moving Average (EMA) tracking.
 
-    Public API
-    ----------
-    init(params)                 -> state
-    update(grads, state, params) -> (new_params, new_state)
-    get_ema_params(state)        -> params | None
-    get_step(state)              -> int
-    reset_accumulation(state,
-                        params)  -> state
+    Subclass to implement specific optimizers (e.g., Adam, SGD) by defining
+    `_create_optax_transform()`.
+
+    Args:
+        learning_rate (float): Base learning rate.
+        weight_decay (float, optional): Decoupled weight decay rate (AdamW style). Default: 0.0.
+        clipnorm (float, optional): Per-gradient norm clip threshold. Default: None.
+        global_clipnorm (float, optional): Global gradient norm clip threshold. Default: None.
+        loss_scale (float, optional): Loss scale for mixed-precision training. Default: None.
+        accumulate_steps (int, optional): Number of steps to accumulate gradients before update. Default: None.
+        use_ema (bool, optional): Whether to track an Exponential Moving Average of parameters. Default: False.
+        ema_decay (float, optional): Decay rate for EMA. Default: 0.999.
+        ema_every (int, optional): Swap to EMA params every N steps (if set). Default: None.
+        **kwargs: Additional keyword arguments forwarded to optimizer-specific configuration.
+
+    Attributes:
+        learning_rate (float): The base learning rate.
+        weight_decay (float): Weight decay hyperparameter.
+        clipnorm (float | None): Per-gradient clipping threshold.
+        global_clipnorm (float | None): Global gradient norm threshold.
+        loss_scale (float | None): Loss scaling factor for mixed-precision.
+        accumulate_steps (int | None): Number of steps to accumulate gradients.
+        use_ema (bool): Whether EMA is used.
+        ema_decay (float): EMA decay rate.
+        ema_every (int | None): Swap interval for EMA params.
+        config (dict): Additional config passed to the subclass optimizer.
+        opt_transform (optax.GradientTransformation): Composed optax transformation pipeline.
+
+    Methods:
+        init(params) -> dict:
+            Initialize optimizer state for a set of model parameters.
+        update(grads, state, params) -> (new_params, new_state):
+            Apply an update step given gradients, previous state, and params.
+        get_ema_params(state) -> Any | None:
+            Retrieve EMA parameters from state, if EMA is enabled.
+        get_step(state) -> int:
+            Return the step counter from the state.
+        reset_accumulation(state, params) -> dict:
+            Reset accumulated gradients in the state (for gradient accumulation).
+        get_config() -> dict:
+            Return the optimizer configuration as a serializable dictionary.
+
+    Example:
+        ```python
+        class Adam(BaseOptimizer):
+            def _create_optax_transform(self, learning_rate, **kwargs):
+                return optax.adam(learning_rate)
+
+        optimizer = Adam(learning_rate=1e-3)
+        state = optimizer.init(params)
+        for batch in dataset:
+            grads = compute_grads(params, batch)
+            params, state = optimizer.update(grads, state, params)
+        ```
+    Notes:
+        - By default, update returns `(new_params, new_state)`; you never call `optax.apply_updates` directly.
+        - Supports gradient accumulation, loss scaling, and parameter averaging for robust, scalable training.
+        - All transformations are composed and applied in sequence:
+          gradient clipping → weight decay → optimizer.
+
+    Raises:
+        NotImplementedError: If subclass does not implement `_create_optax_transform`.
     """
+
 
     # -------------------------------------------------- #
     # Construction

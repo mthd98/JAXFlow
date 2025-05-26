@@ -22,18 +22,88 @@ from __future__ import annotations
 import abc
 import inspect
 from typing import Dict, Any, Mapping, List, Optional
-
+import jax
 import jax.numpy as jnp
 
 from jaxflow.core.variable import Variable
-# jaxflow/utils/naming.py
 from collections import defaultdict
 from threading import Lock
 from typing import Optional, Dict
 from jaxflow.core.auto_name import AutoNameMixin
 
+
+
 class Layer(AutoNameMixin, abc.ABC):
-    """Abstract super-class for all neural-network layers in JAXFlow."""
+    """
+    Abstract base class for all neural network layers in JAXFlow.
+
+    `Layer` implements the foundational API for building custom layers, 
+    managing parameters, automatic name scoping, sub-layer registration, 
+    and pure-functional forward passes. All JAXFlow layers should inherit 
+    from this class to enable composability and maintain consistency with 
+    the JAXFlow architecture.
+
+    Key Features:
+        - Variable declaration with automatic name scoping.
+        - Transparent sub-layer registration via attribute assignment.
+        - Lazy `build()` invocation upon first call.
+        - Both object-oriented and pure-functional forward APIs.
+        - Mask propagation support via `compute_mask`.
+        - Utility functions for parameter management and summaries.
+        - Global auto-naming via `AutoNameMixin`.
+
+    Args:
+        name (str, optional): Name for the layer. If None, a unique name is auto-generated.
+        trainable (bool, optional): Whether the layer's variables are trainable. Defaults to True.
+
+    Inputs:
+        inputs (Array, PyTree, or Sequence): Input data for the layer. The exact format is determined
+            by the subclass implementation.
+
+    Input shape:
+        Arbitrary; subclasses define required shape. Commonly, input shape is `(batch_size, features)` 
+        for dense layers, or `(batch_size, ..., channels)` for convolutional layers.
+
+    Output shape:
+        Arbitrary; subclasses define the output shape. Usually determined by the layer's transformation.
+
+    Attributes:
+        name (str): The name of the layer, unique within the model.
+        trainable (bool): Whether variables in this layer are trainable.
+        variables (list of Variable): All variables in this layer and its sub-layers.
+        trainable_variables (list of Variable): All trainable variables in this layer and sub-layers.
+        built (bool): Whether the layer has been built.
+        built_shape (Any): The shape(s) with which the layer was built.
+        _params (dict): Mapping of variable names to Variable objects.
+        _sub_layers (dict): Mapping of sub-layer names to Layer objects.
+
+    Example:
+        ```python
+        class MyDense(Layer):
+            def __init__(self, units, name=None, trainable=True):
+                super().__init__(name=name, trainable=trainable)
+                self.units = units
+
+            def build(self, input_shape):
+                self.add_variable('kernel', shape=(input_shape[-1], self.units))
+                self.add_variable('bias', shape=(uself.nits,))
+            def call(self, inputs, training=False, mask=None):
+                kernel = self._params['kernel'].value
+                bias = self._params['bias'].value
+                return jnp.dot(inputs, kernel) + bias
+
+        layer = MyDense(name='dense_1')
+        output = layer(jnp.ones((32, 128)))
+        ```
+
+    Raises:
+        NotImplementedError: If `build` or `call` are not implemented by subclass.
+        ValueError: If required arguments (e.g., for variable initialization) are missing.
+
+    Note:
+        This class is intended to be subclassed. Subclasses must implement `build` and `call`.
+    """
+
 
     # ------------------------------------------------------------------ #
     # Construction
@@ -204,8 +274,27 @@ class Layer(AutoNameMixin, abc.ABC):
                 tree[sub.name] = sub_tree
         return tree
 
-    def get_params(self, trainable_only: bool = True) -> Dict[str, Any]:
-        return self._collect_params(trainable_only)
+    def get_params(
+    self,
+    trainable_only: bool = True,
+    *,
+    concrete: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Return a PyTree of parameters.
+
+        Args
+        ----
+        trainable_only : if ``True`` return only trainable vars.
+        concrete       : if ``True`` run `jax.device_get` on every leaf
+                        so the result is guaranteed to be a DeviceArray
+                        (never a Tracer), even when called inside a
+                        ``jit`` / ``grad`` context.
+        """
+        tree = self._collect_params(trainable_only)
+        if concrete:
+            tree = jax.tree.map(jax.device_get, tree)
+        return tree
 
     def _apply_params(self, tree: Mapping[str, Any]):
         for name, var in self._params.items():

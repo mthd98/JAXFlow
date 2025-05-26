@@ -2,23 +2,60 @@ import jax.numpy as jnp
 from jaxflow.layers.layer import Layer
 
 class GlobalAveragePooling3D(Layer):
-    """Global Average Pooling **3‑D** layer for *jaxflow*.
+    """
+    Global average pooling 3D layer for NDHWC tensors in JAXFlow.
 
-    *Input shape*  : ``(batch, depth, height, width, channels)``  (N, D, H, W, C)
-
-    *Output shape* :
-      * ``(batch, channels)``  if ``keepdims=False`` (default)
-      * ``(batch, 1, 1, 1, channels)``  if ``keepdims=True``
-
-    The layer averages each feature map over the three spatial dimensions
-    (D×H×W).  It contains **no trainable parameters** but adheres to the full
-    *jaxflow* `Layer` API so it can sit anywhere in a model.
+    Averages each feature map over the three spatial dimensions (depth, height, width)
+    for every sample in the batch. This layer contains **no trainable parameters** and 
+    fits seamlessly into any JAXFlow model.
 
     Args:
-        keepdims (bool, optional): If *True*, retain singleton spatial dims.
-        name (str, optional): Layer name.  Defaults to class name.
-        trainable (bool, optional): Kept for API symmetry (ignored).
+        keepdims (bool, optional): If True, retains singleton spatial dimensions, 
+            so the output shape is (batch, 1, 1, 1, channels). Defaults to False,
+            which produces output shape (batch, channels).
+        name (str, optional): Layer name. If None, a unique name is generated.
+        trainable (bool, optional): Kept for API compatibility (ignored). Defaults to True.
+
+    Inputs:
+        inputs (jnp.ndarray): 5D tensor of shape (batch, depth, height, width, channels).
+
+    Input shape:
+        (batch_size, depth, height, width, channels)
+
+    Output shape:
+        (batch_size, channels) if keepdims=False (default);
+        (batch_size, 1, 1, 1, channels) if keepdims=True.
+
+    Attributes:
+        keepdims (bool): Whether to keep singleton spatial dimensions in the output.
+        built (bool): Whether the layer has been built.
+
+    Example:
+        ```python
+        import jax.numpy as jnp
+        from jaxflow.layers.pooling import GlobalAveragePooling3D
+
+        # Example input: batch of 2, depth=4, height=5, width=6, 3 channels
+        x = jnp.ones((2, 4, 5, 6, 3))
+        gap = GlobalAveragePooling3D()
+        y = gap(x)
+        print(y.shape)  # (2, 3)
+
+        # With keepdims=True
+        gap_keep = GlobalAveragePooling3D(keepdims=True)
+        y2 = gap_keep(x)
+        print(y2.shape)  # (2, 1, 1, 1, 3)
+        ```
+
+    Raises:
+        ValueError: If input is not a 5D tensor.
+
+    Note:
+        - No trainable parameters.
+        - Reduces across the three spatial dimensions (axes 1, 2, 3).
+        - Compatible with masking via the parent Layer's API.
     """
+
 
     def __init__(self, *, keepdims: bool = False, name: str | None = None, trainable: bool = True):
         super().__init__(name=name, trainable=trainable)

@@ -30,16 +30,22 @@ from jax.nn.initializers import (
 
 from jaxflow.core.auto_name import AutoNameMixin
 
-class Initializer(AutoNameMixin,abc.ABC):
-    """
-    A base class for initializers.
 
-    This class handles the common random key management, and
-    forces subclasses to implement the __call__ method.
-    Additionally, it stores a name for the initializer.
+class Initializer(AutoNameMixin, abc.ABC):
     """
-    def __init__(self, seed: Optional[int] = 42, dtype=jnp.float32, name: str = None):
-        # If seed is None, choose a random seed using Python's random module.
+    Abstract base class for initializers in jaxflow.
+
+    Handles:
+    - Random key management (default is stateless; can be overridden)
+    - Name and dtype tracking
+
+    Args:
+        seed (int, optional): Base seed for RNG (default: None, uses random seed).
+        dtype (jax.numpy.dtype, optional): Storage dtype (default: float32).
+        name (str, optional): Initializer name.
+    """
+
+    def __init__(self, seed: Optional[int] = None, dtype=jnp.float32, name: str = None):
         if seed is None:
             seed = pyrandom.randint(0, 2**32 - 1)
         self.key = random.PRNGKey(seed)
@@ -47,12 +53,23 @@ class Initializer(AutoNameMixin,abc.ABC):
         self.name = self.auto_name(name)
 
     @abc.abstractmethod
-    def __call__(self, shape):
+    def __call__(self, shape, key: Optional[random.PRNGKey] = None):
         """
-        Initialize weights with the given shape and dtype.
-        Must be implemented by subclasses.
+        Returns initialized array with given shape and dtype.
+        Subclasses must implement this method.
+
+        Args:
+            shape (tuple): Shape of array.
+            key (jax.random.PRNGKey, optional): RNG key. If None, uses self.key.
+
+        Returns:
+            jax.numpy.DeviceArray: Initialized array.
         """
         pass
+
+    def __repr__(self):
+        return f"<Initializer {self.name} dtype={self.dtype}>"
+
 
 # Already implemented initializers:
 

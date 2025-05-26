@@ -5,25 +5,30 @@ from jax import random
 from jaxflow.layers.layer import Layer
 
 
-
 class Dropout(Layer):
-    """Inverted Dropout layer for **jaxflow**.
+    """
+    Inverted Dropout layer for **jaxflow** (JAX/Optax compatible).
 
-    At *training* time a random mask zeroes a fraction (*rate*) of the inputs
-    and rescales the survivors by ``1 / (1‑rate)`` so the expected sum stays
-    constant.  At inference the layer is the identity function.
+    Randomly sets input units to zero with probability `rate` at training time,
+    scaling the remaining activations by `1 / (1 - rate)` so the expected sum
+    remains unchanged. No effect at inference (test) time.
 
-    Parameters
-    ----------
-    rate : float in [0, 1)
-        Probability of *dropping* (zeroing) each individual element.
-    seed : int | None, default *None*
-        Base RNG seed.  If *None* a random 32‑bit seed is chosen with NumPy.
-    name : str | None
-        Optional layer name.
-    trainable : bool, default *False*
-        Present for API consistency – Dropout has no parameters, so this flag
-        has no effect.
+    Supports both stateful (eager) and stateless (functional) APIs.
+
+    Args:
+        rate (float): Fraction of the input units to drop (between 0 and 1).
+        seed (int, optional): Random seed for reproducibility. If None, uses a random seed.
+        name (str, optional): Layer name.
+        trainable (bool, optional): No effect (Dropout is stateless), for API symmetry.
+
+    Example:
+        >>> drop = Dropout(rate=0.5)
+        >>> out = drop(x, training=True)
+
+    Notes:
+        - `call()` is not pure-functional (updates self._key); use `functional_call` in JIT/pmap or when using stateful training loops.
+        - Dropout is only applied at training time (`training=True`).
+
     """
 
     def __init__(self, rate: float, *, seed: int | None = None, name=None, trainable=False):

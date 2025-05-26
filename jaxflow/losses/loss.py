@@ -16,21 +16,73 @@ class LossMeta(type):
         Loss.__init__(instance, **loss_params)
         return instance
 
-class Loss(AutoNameMixin,metaclass=LossMeta):
+class Loss(AutoNameMixin, metaclass=LossMeta):
     """
     Base class for loss functions in a JAX/Optax workflow.
 
-    This class is inspired by Keras’s Loss base class and supports:
-      - Configurable `name`, `reduction`, and `dtype`
-      - Converting inputs to the proper dtype
-      - Optional sample weighting and masking, followed by reduction
+    This abstract class provides a consistent API for implementing custom losses
+    compatible with JAX, Optax, and JAXFlow training workflows. Modeled after
+    Keras's `Loss` base class, it supports:
+      - Configurable reduction mode, dtype, and name
+      - Sample weighting and masking (with flexible shape handling)
+      - Automatic reduction over batch and/or sample dimensions
+      - Easy subclassing for custom elementwise loss logic
 
     Args:
-      name: Optional name for the loss instance.
-      reduction: Reduction mode to apply. Supported options are:
-          "sum_over_batch_size", "sum", "mean", "mean_with_sample_weight", "none", or None.
-      dtype: The dtype for loss computations. Defaults to jnp.float32.
+        name (str, optional): Optional name for the loss instance. If None, a unique name is generated.
+        reduction (str, optional): Reduction mode to apply to the loss. Supported options:
+            "sum_over_batch_size" (default), "sum", "mean", "mean_with_sample_weight", "none", or None.
+        dtype (jnp.dtype, optional): Data type for loss computations. Defaults to jnp.float32.
+
+    Inputs:
+        y_true (array-like): Ground truth target values.
+        y_pred (array-like): Model predictions.
+        sample_weight (array-like, optional): Optional per-sample weights for the loss.
+        mask (array-like, optional): Optional boolean mask to apply to y_true/y_pred.
+
+    Input shape:
+        Arbitrary shapes as long as `call(y_true, y_pred)` produces a per-sample loss.
+        Sample weights and mask should be broadcastable to the loss shape.
+
+    Output shape:
+        Scalar, unless reduction="none", in which case the unreduced loss array is returned.
+
+    Attributes:
+        name (str): Name for the loss instance.
+        reduction (str): Reduction method ("sum_over_batch_size", "sum", "mean", etc.).
+        dtype (jnp.dtype): Data type used for computations.
+
+    Example:
+        ```python
+        import jax.numpy as jnp
+        from jaxflow.losses.loss import Loss
+
+        class MySquaredError(Loss):
+            def call(self, y_true, y_pred):
+                return (y_true - y_pred) ** 2
+
+        loss_fn = MySquaredError(reduction="mean")
+        y_true = jnp.array([1.0, 2.0, 3.0])
+        y_pred = jnp.array([1.1, 2.2, 2.9])
+        loss = loss_fn(y_true, y_pred)
+        print(loss)
+        ```
+
+    Notes:
+        - To implement a new loss, override the `call(self, y_true, y_pred)` method in a subclass.
+        - Sample weights and mask are automatically broadcast and applied if provided.
+        - The reduction mode controls how the final scalar loss is computed from per-sample values.
+        - Compatible with JAX JIT/vmap/pmap for functional workflows.
+
+    Raises:
+        NotImplementedError: If `call()` is not implemented in a subclass.
+        ValueError: For invalid reduction arguments or incompatible input shapes.
+
+    See Also:
+        - Keras Loss base class: https://keras.io/api/losses/
+        - Optax loss functions: https://optax.readthedocs.io/en/latest/api.html
     """
+
 
     @staticmethod
     def _standardize_reduction(reduction):

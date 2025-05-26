@@ -4,11 +4,84 @@ from jaxflow.layers.layer import Layer
 from jaxflow.initializers.initializers import GlorotUniform, Zeros
 
 class Conv3D(Layer):
-    """3‑D convolution layer for **jaxflow**.
+    """
+    3D convolution layer for volumetric (spatial or spatio-temporal) data in JAXFlow.
 
-    Expects inputs in **NDHWC** layout *(batch, depth, height, width, channels)*
-    and produces outputs in the same layout.  Behaviour mirrors your `Conv2D`
-    and `Conv1D` layers so you can swap dimensions with minimal changes.
+    This layer creates a trainable 3D convolution kernel and applies it to input tensors
+    of shape (batch, depth, height, width, channels) (NDHWC layout), producing outputs in
+    the same layout. Supports grouped, dilated, or standard convolution, device placement,
+    sharding, and both object-oriented and functional APIs.
+
+    Args:
+        filters (int): Number of output feature maps (channels).
+        kernel_size (int or tuple of int): Depth, height, and width of the convolution kernel.
+            If an int, uses the same value for all three dimensions.
+        strides (int or tuple of int, optional): Stride for the spatial dimensions. Defaults to 1.
+        padding (str or tuple, optional): "SAME", "VALID", or explicit padding. Defaults to "SAME".
+        dilation (int or tuple of int, optional): Dilation rate for dilated convolution. Defaults to 1.
+        groups (int, optional): Number of groups for grouped convolution. Defaults to 1.
+        activation (callable, optional): Activation function to apply after bias. Defaults to None (linear).
+        use_bias (bool, optional): Whether to add a learnable bias. Defaults to True.
+        kernel_initializer (callable, optional): Initializer for the kernel weights.
+            Defaults to GlorotUniform.
+        bias_initializer (callable, optional): Initializer for the bias. Defaults to Zeros.
+        device (str, optional): Device for parameter placement ("auto", "cpu", "gpu", "tpu"). Defaults to "auto".
+        shard_devices (list or str, optional): Devices for parameter sharding. See Variable docs.
+        dtype (jax.numpy.dtype, optional): Data type for parameters. Defaults to float32.
+        trainable (bool, optional): Whether the layer is trainable. Defaults to True.
+        name (str, optional): Name for the layer. If None, a unique name is generated.
+        seed (int, optional): Random seed for parameter initialization.
+        kernel_regularizer, bias_regularizer, activity_regularizer, kernel_constraint, bias_constraint (callable, optional):
+            Placeholders for Keras compatibility (stored but not used).
+
+    Inputs:
+        inputs (jnp.ndarray): 5D tensor of shape (batch, depth, height, width, channels).
+
+    Input shape:
+        (batch_size, depth, height, width, in_channels)
+
+    Output shape:
+        (batch_size, out_depth, out_height, out_width, filters)
+        where the spatial output dims depend on padding, kernel_size, strides, and dilation.
+
+    Attributes:
+        filters (int): Number of output channels.
+        kernel_size (tuple): (depth, height, width) of the convolution kernel.
+        strides (tuple): Strides along each spatial dimension.
+        padding (str or tuple): Padding strategy.
+        dilation (tuple): Dilation rate.
+        groups (int): Number of groups for grouped convolution.
+        use_bias (bool): Whether a bias is included.
+        kernel (Variable): The kernel variable.
+        bias (Variable): The bias variable, if use_bias is True.
+        activation (callable): The activation function.
+        device (str): Device for kernel/bias placement.
+        shard_devices (list or str): Devices for sharding.
+        dtype (jax.numpy.dtype): Data type of the kernel and bias.
+        built (bool): Whether the layer has been built.
+
+    Example:
+        ```python
+        import jax
+        import jax.numpy as jnp
+        from jaxflow.layers.conv3d import Conv3D
+
+        # Example input: batch of 2, depth=10, height=32, width=32, 4 channels
+        x = jnp.ones((2, 10, 32, 32, 4))
+        # Conv3D layer: 8 filters, 3x3x3 kernel, stride 2, ReLU activation
+        conv = Conv3D(8, 3, strides=2, activation=jax.nn.relu)
+        y = conv(x)
+        print(y.shape)  # (2, 5, 16, 16, 8) if padding="SAME"
+        ```
+
+    Raises:
+        ValueError: If input shape, group/channel configuration, or variable shapes are invalid.
+
+    Note:
+        - Input must have 5 dimensions: (batch, depth, height, width, channels) (NDHWC layout).
+        - For grouped convolution, in_channels must be divisible by groups.
+        - Output shape depends on padding, kernel size, strides, and dilation.
+        - Kernel and bias variables are created lazily during the first call.
     """
 
     # ------------------------------------------------------------------

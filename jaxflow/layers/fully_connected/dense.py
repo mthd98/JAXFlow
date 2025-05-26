@@ -3,42 +3,70 @@ from jax import lax
 from jaxflow.layers.layer import Layer
 from jaxflow.initializers.initializers import GlorotUniform, Zeros
 
-
-
 class Dense(Layer):
-    """Fully‑connected (affine) layer for **jaxflow**.
-
-    Transforms the last dimension of the input tensor via a learned matrix and
-    optional bias, followed by an optional non‑linear activation.
-
-    ``y = activation(x @ W + b)``
-
-    Parameters
-    ----------
-    units : int
-        Number of output features (columns of *W*).
-    activation : callable | None, default ``None``
-        Activation function applied after the affine transform.  ``None`` means
-        linear output.
-    use_bias : bool, default ``True``
-        Whether to include a bias term.
-    kernel_initializer, bias_initializer : callable or Initializer subclass
-        Objects that return an array given a ``shape`` argument.  Defaults are
-        *GlorotUniform* for the kernel and *Zeros* for the bias.
-    dtype : jnp.dtype, default ``jnp.float32``
-        Data type of the parameters.
-    device : str, default ``"auto"``
-        Device placement for un‑sharded parameters (``"cpu"``, ``"gpu"``, …).
-    shard_devices : list[jax.Device] | str | None
-        If provided, parameters are sharded across these devices; ``"auto"``
-        selects all devices matching *device*'s platform.
-    seed : int | None
-        Random seed forwarded to the initializers.
-    name : str | None
-        Layer name (defaults to class name).
-    trainable : bool, default ``True``
-        Whether the parameters participate in gradient updates.
     """
+    Fully-connected (affine) layer for JAXFlow.
+
+    Transforms the last dimension of the input tensor via a trainable matrix
+    and optional bias, followed by an optional activation function:
+    `output = activation(inputs @ kernel + bias)`
+
+    Args:
+        units (int): Number of output features (the last dimension of the output).
+        activation (callable, optional): Activation function applied after the affine transform.
+            If None, no activation is applied (linear output). Defaults to None.
+        use_bias (bool, optional): Whether to include a bias term. Defaults to True.
+        kernel_initializer (callable or Initializer, optional): Initializer for the kernel weights.
+            Defaults to GlorotUniform.
+        bias_initializer (callable or Initializer, optional): Initializer for the bias. Defaults to Zeros.
+        dtype (jnp.dtype, optional): Data type for the parameters. Defaults to jnp.float32.
+        device (str, optional): Device for parameter placement ("auto", "cpu", "gpu", "tpu"). Defaults to "auto".
+        shard_devices (list or str, optional): Devices for sharding parameters. See Variable docs.
+        seed (int, optional): Random seed for initializers.
+        name (str, optional): Layer name. If None, a unique name is generated.
+        trainable (bool, optional): Whether the parameters are trainable. Defaults to True.
+
+    Inputs:
+        inputs (jnp.ndarray): Tensor of rank >= 2. The last dimension must match the kernel input.
+
+    Input shape:
+        (..., input_dim), where input_dim is the size of the last dimension.
+
+    Output shape:
+        (..., units), replacing the last dimension with `units`.
+
+    Attributes:
+        units (int): Number of output features.
+        activation (callable or None): Activation function.
+        use_bias (bool): Whether bias is used.
+        kernel (Variable): Kernel (weight matrix) variable.
+        bias (Variable): Bias variable, if use_bias is True.
+        device (str): Device for parameter placement.
+        dtype (jnp.dtype): Data type of the parameters.
+        built (bool): Whether the layer has been built.
+
+    Example:
+        ```python
+        import jax
+        import jax.numpy as jnp
+        from jaxflow.layers.dense import Dense
+
+        # Example input: batch of 16, 64 features
+        x = jnp.ones((16, 64))
+        dense = Dense(32, activation=jax.nn.relu)
+        y = dense(x)
+        print(y.shape)  # (16, 32)
+        ```
+
+    Raises:
+        ValueError: If input shape does not match kernel dimensions.
+
+    Note:
+        - Inputs must have rank >= 2 (usually [batch_size, input_dim]).
+        - Last dimension of inputs must match kernel input dimension.
+        - Supports device placement and sharding for distributed training.
+    """
+
 
     def __init__(
         self,

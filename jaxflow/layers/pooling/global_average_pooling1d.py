@@ -2,16 +2,58 @@ import jax.numpy as jnp
 from jaxflow.layers.layer import Layer
 
 class GlobalAveragePooling1D(Layer):
-    """Global Average Pooling **1‑D** layer for *jaxflow*.
-
-    *Input shape*  : ``(batch, length, channels)`` (N, L, C)
-
-    *Output shape* : ``(batch, channels)`` if ``keepdims=False`` *(default)*,
-    else ``(batch, 1, channels)``.
-
-    This layer has **no trainable parameters** – it simply averages each
-    feature map over the temporal/sequence *length* dimension.
     """
+    Global average pooling 1D layer for JAXFlow.
+
+    Averages each feature map across the temporal/sequence (length) dimension
+    for each sample in the batch. This layer has **no trainable parameters**.
+    Supports object-oriented and functional APIs.
+
+    Args:
+        name (str, optional): Name for the layer. If None, a unique name is generated.
+        keepdims (bool, optional): If True, retains a singleton length dimension
+            (output shape (batch, 1, channels)). Defaults to False (output shape (batch, channels)).
+
+    Inputs:
+        inputs (jnp.ndarray): 3D tensor of shape (batch, length, channels).
+
+    Input shape:
+        (batch_size, length, channels)
+
+    Output shape:
+        (batch_size, channels) if keepdims=False (default);
+        (batch_size, 1, channels) if keepdims=True.
+
+    Attributes:
+        keepdims (bool): Whether to keep the length dimension (as size 1).
+        built (bool): Whether the layer has been built.
+
+    Example:
+        ```python
+        import jax.numpy as jnp
+        from jaxflow.layers.pooling import GlobalAveragePooling1D
+
+        # Example input: batch of 4, length 10, 8 channels
+        x = jnp.ones((4, 10, 8))
+        gap = GlobalAveragePooling1D()
+        y = gap(x)
+        print(y.shape)  # (4, 8)
+
+        # With keepdims=True
+        gap_keep = GlobalAveragePooling1D(keepdims=True)
+        y2 = gap_keep(x)
+        print(y2.shape)  # (4, 1, 8)
+        ```
+
+    Raises:
+        ValueError: If input is not a 3D tensor.
+
+    Note:
+        - No trainable parameters.
+        - Reduces across the sequence (axis=1).
+        - Compatible with masking via the parent Layer's API.
+    """
+
 
     def __init__(self, *, name=None, keepdims: bool = False):
         super().__init__(name=name, trainable=False)

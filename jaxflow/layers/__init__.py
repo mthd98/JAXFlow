@@ -44,3 +44,4 @@ from .reshaping.flatten import Flatten
 
 
 # embedding layers
+from .embedding.embedding import Embedding

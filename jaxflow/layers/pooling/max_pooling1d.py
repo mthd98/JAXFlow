@@ -8,11 +8,64 @@ from jaxflow.layers.layer import Layer
 
 
 class MaxPooling1D(Layer):
-    """Max‑Pooling layer for **1‑D** feature maps *(N, L, C)*.
-
-    *pool_size* and *strides* follow Keras semantics; padding may be
-    "VALID"/"SAME" (upper‑case) **or** an explicit tuple ``((pad_left, pad_right),)``.
     """
+    Max pooling 1D layer for JAXFlow.
+
+    Applies 1D max pooling along the temporal/sequence (length) axis of 3D inputs.
+    Follows Keras semantics for pool_size and strides; supports both standard string
+    padding ("VALID"/"SAME") and explicit tuple-based padding.
+
+    Args:
+        pool_size (int): Size of the max pooling window.
+        strides (int or None, optional): Stride of the pooling operation.
+            If None, defaults to pool_size.
+        padding (str or tuple, optional): Padding strategy ("VALID", "SAME", or
+            an explicit tuple ((pad_left, pad_right),)). Defaults to "VALID".
+        dilation (int, optional): Dilation rate for pooling. Defaults to 1.
+        keepdims (bool, optional): If True, output length dimension is kept as 1
+            when the output length is 1. Defaults to False.
+        name (str or None, optional): Layer name. If None, a unique name is generated.
+        trainable (bool, optional): Ignored (for API compatibility). Defaults to False.
+
+    Inputs:
+        inputs (jnp.ndarray): 3D tensor of shape (batch, length, channels).
+
+    Input shape:
+        (batch_size, length, channels)
+
+    Output shape:
+        (batch_size, output_length, channels) if keepdims=False (default);
+        (batch_size, 1, channels) if keepdims=True and output length is 1.
+
+    Attributes:
+        pool_size (int): Size of the pooling window.
+        strides (int): Stride for pooling.
+        padding (str or tuple): Padding strategy.
+        dilation (int): Dilation rate for pooling.
+        keepdims (bool): Whether to keep the reduced length dimension.
+        built (bool): Whether the layer has been built.
+
+    Example:
+        ```python
+        import jax.numpy as jnp
+        from jaxflow.layers.pooling import MaxPooling1D
+
+        # Example input: batch of 4, length 8, 3 channels
+        x = jnp.arange(4 * 8 * 3).reshape(4, 8, 3)
+        pool = MaxPooling1D(pool_size=2, strides=2, padding="SAME")
+        y = pool(x)
+        print(y.shape)  # (4, 4, 3)
+        ```
+
+    Raises:
+        ValueError: If input is not a 3D tensor.
+
+    Note:
+        - No trainable parameters.
+        - Pooling is performed along the length axis (axis=1).
+        - Supports both string and explicit tuple padding.
+    """
+
 
     def __init__(
         self,

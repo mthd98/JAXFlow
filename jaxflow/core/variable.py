@@ -4,6 +4,84 @@ from jax.sharding import PartitionSpec as P, NamedSharding
 from jaxflow.core.auto_name import AutoNameMixin
 
 class Variable(AutoNameMixin):
+    """
+    A mutable, device-aware array variable for JAXFlow layers and models.
+
+    `Variable` represents a trainable or non-trainable tensor that supports
+    automatic device placement and sharding across multiple JAX devices. 
+    It provides an interface similar to `tf.Variable` or Keras `Variable`, 
+    but adapted for high-performance JAX workflows, including support for 
+    sharding, memory kind control, and arithmetic operations.
+
+    Args:
+        initial_value (array-like): The initial value for the variable. If not provided,
+            `shape` must be specified, and the variable will be initialized to zeros.
+        trainable (bool): Whether the variable is trainable (i.e., updated during optimization).
+            Defaults to True.
+        name (str, optional): Name for this variable. If None, an auto-generated unique name is used.
+        variable_def (Any, optional): Optional metadata or definition object.
+        dtype (jax.numpy.dtype, optional): Data type for the variable. If not provided,
+            inferred from `initial_value` or defaults to float32.
+        shape (tuple, optional): Shape of the variable. Required if `initial_value` is not given.
+        device (str, optional): Device placement strategy: 'auto', 'cpu', 'gpu', or 'tpu'.
+            Defaults to 'auto' (auto-selects device preference order: GPU > TPU > CPU).
+        shard_devices (list or str, optional): Shard the variable across multiple devices.
+            If 'auto', automatically selects all devices of the platform chosen by `device`.
+            If a list, must be a list of JAX devices. If None, no sharding is performed.
+        sharding (Any, optional): Full JAX sharding specification (e.g., NamedSharding).
+            If provided, this overrides other device placement arguments.
+        memory_kind (str, optional): Overrides the memory kind for sharded variables
+            (e.g., 'pinned_host', 'device').
+
+    Inputs:
+        None directly; use in layers as a parameter container.
+
+    Input shape:
+        Specified by `shape` or inferred from `initial_value`.
+
+    Output shape:
+        Matches the input shape.
+
+    Attributes:
+        name (str): Variable name, unique in context.
+        trainable (bool): Whether this variable is trainable.
+        shape (tuple): Shape of the variable.
+        dtype (jax.numpy.dtype): Data type of the variable.
+        value (jax.Array): The actual array, placed on device(s).
+        device (list): List of devices over which the variable is placed or sharded.
+
+    Example:
+        ```python
+        import jax
+        import jax.numpy as jnp
+        from jaxflow.core.variable import Variable
+
+        # Create a variable on the default (auto-selected) device
+        w = Variable(initial_value=jnp.ones((3, 3)), name="weight")
+
+        # Create a variable and shard it across all CPUs
+        cpu_devices = [d for d in jax.devices() if d.platform == "cpu"]
+        if cpu_devices:
+            v_sharded = Variable(initial_value=jnp.ones((4, 4)),
+                                 name="kernel",
+                                 shard_devices=cpu_devices)
+        
+        # Assign a new value
+        w.assign(jnp.zeros((3, 3)))
+
+        # Access as a numpy array
+        np_arr = w.numpy()
+        ```
+
+    Raises:
+        ValueError: If shape and initial_value are incompatible, or sharding setup is invalid.
+
+    Note:
+        The variable supports direct arithmetic (e.g., `var + 1`, `var @ x`), can be
+        passed as input to JAX/NumPy operations, and provides methods for device and 
+        sharding introspection.
+
+    """
     def __init__(self,
                  initial_value=None,
                  trainable=True,

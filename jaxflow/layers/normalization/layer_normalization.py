@@ -3,14 +3,70 @@ from jaxflow.layers.layer import Layer
 from jaxflow.initializers import GlorotUniform, Zeros,Ones
 
 class LayerNormalization(Layer):
-    """Layer Normalization layer for **jaxflow** (Ba et al., 2016).
-
-    Normalizes across the **feature axes** of each sample independently,
-    stabilising hidden‑state dynamics and improving training speed.
-
-    Parameters follow the conventions of Keras / PyTorch so you can swap code
-    easily.
     """
+    Layer normalization layer for JAXFlow (Ba et al., 2016).
+
+    Normalizes activations across the specified feature axes for each sample independently,
+    stabilizing hidden-state dynamics and improving training speed. Supports centering
+    and scaling via trainable parameters. API and behavior closely match Keras and PyTorch.
+
+    Args:
+        axis (int or tuple of int): Axis or axes that should be normalized (typically the features axis).
+            Negative values are supported and refer to axes from the end.
+        epsilon (float, optional): Small constant added to variance to avoid division by zero.
+            Defaults to 1e-5.
+        center (bool, optional): If True, add offset (beta) to normalized tensor. Defaults to True.
+        scale (bool, optional): If True, multiply by scale (gamma). Defaults to True.
+        beta_initializer (callable or Initializer, optional): Initializer for beta. Defaults to Zeros.
+        gamma_initializer (callable or Initializer, optional): Initializer for gamma. Defaults to Ones.
+        name (str, optional): Layer name. If None, a unique name is generated.
+        device (str, optional): Device for parameter placement ("auto", "cpu", "gpu", "tpu"). Defaults to "auto".
+        shard_devices (list or str, optional): Devices for parameter sharding. See Variable docs.
+        dtype (jnp.dtype, optional): Data type for parameters. Defaults to jnp.float32.
+        trainable (bool, optional): Whether parameters are trainable. Defaults to True.
+
+    Inputs:
+        inputs (jnp.ndarray): Arbitrary-rank tensor. Normalization is performed over `axis`.
+
+    Input shape:
+        Any shape. Most commonly (batch_size, features) or (batch_size, ..., features).
+
+    Output shape:
+        Same as input shape.
+
+    Attributes:
+        axis (tuple): Axes being normalized.
+        epsilon (float): Epsilon added to variance.
+        center (bool): Whether to learn beta (offset).
+        scale (bool): Whether to learn gamma (scale).
+        beta (Variable): Beta parameter (if center=True).
+        gamma (Variable): Gamma parameter (if scale=True).
+        dtype (jnp.dtype): Data type of parameters.
+        built (bool): Whether the layer has been built.
+
+    Example:
+        ```python
+        import jax
+        import jax.numpy as jnp
+        from jaxflow.layers.normalization import LayerNormalization
+
+        # Example input: batch of 16, 64 features
+        x = jnp.ones((16, 64))
+        ln = LayerNormalization(axis=-1)
+        y = ln(x)
+        print(y.shape)  # (16, 64)
+        ```
+
+    Raises:
+        ValueError: If input shape does not match required axes.
+
+    Note:
+        - Supports centering (beta) and scaling (gamma) via trainable parameters.
+        - Axis can be negative or a tuple of axes.
+        - Output always has the same shape as input.
+        - Compatible with both object-oriented and functional APIs.
+    """
+
 
     def __init__(
         self,

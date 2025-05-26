@@ -5,7 +5,7 @@ from jaxflow.losses.loss import Loss
 
 class BinaryCrossentropy(Loss):
     """
-    Computes the Binary Crossentropy loss.
+    Computes the Binary Crossentropy loss in a shape-agnostic way.
 
     Args:
       from_logits: Boolean, whether y_pred are logits. If True, applies sigmoid.
@@ -18,24 +18,42 @@ class BinaryCrossentropy(Loss):
         self.label_smoothing = label_smoothing
 
     def call(self, y_true, y_pred):
-        # Apply label smoothing if needed.
+        # 1) Label smoothing
         if self.label_smoothing > 0:
             y_true = y_true * (1 - self.label_smoothing) + 0.5 * self.label_smoothing
-        # If predictions are logits, convert them.
+
+        # 2) Logits → probabilities
         if self.from_logits:
             y_pred = jax.nn.sigmoid(y_pred)
-        # Clip predictions to avoid log(0).
-        epsilon = 1e-7
-        y_pred = jnp.clip(y_pred, epsilon, 1 - epsilon)
-        # Compute binary crossentropy.
+
+        # 3) Make ndim equal by appending singleton dims to the end
+        if y_true.ndim < y_pred.ndim:
+            y_true = y_true.reshape(y_true.shape + (1,) * (y_pred.ndim - y_true.ndim))
+        elif y_pred.ndim < y_true.ndim:
+            y_pred = y_pred.reshape(y_pred.shape + (1,) * (y_true.ndim - y_pred.ndim))
+
+        # 4) Now broadcast to identical shapes
+        try:
+            y_true, y_pred = jnp.broadcast_arrays(y_true, y_pred)
+        except ValueError as e:
+            raise ValueError(
+                f"Cannot align shapes y_true{y_true.shape} vs y_pred{y_pred.shape}"
+            ) from e
+
+        # 5) Clip to avoid log(0)
+        eps = 1e-7
+        y_pred = jnp.clip(y_pred, eps, 1 - eps)
+
+        # 6) Compute binary crossentropy
         loss = - (y_true * jnp.log(y_pred) + (1 - y_true) * jnp.log(1 - y_pred))
         return loss
 
 # =================== BinaryFocalCrossentropy ===================
 
+
 class BinaryFocalCrossentropy(Loss):
     """
-    Computes the Binary Focal Crossentropy loss.
+    Computes the Binary Focal Crossentropy loss in a shape-agnostic way.
 
     Args:
       gamma: Focusing parameter for modulating factor (default 2.0).
@@ -52,26 +70,46 @@ class BinaryFocalCrossentropy(Loss):
         self.label_smoothing = label_smoothing
 
     def call(self, y_true, y_pred):
-        # Apply label smoothing if needed.
+        # 1) Label smoothing
         if self.label_smoothing > 0:
             y_true = y_true * (1 - self.label_smoothing) + 0.5 * self.label_smoothing
-        # If predictions are logits, convert them.
+
+        # 2) Logits → probabilities
         if self.from_logits:
             y_pred = jax.nn.sigmoid(y_pred)
-        # Clip predictions to avoid log(0).
-        epsilon = 1e-7
-        y_pred = jnp.clip(y_pred, epsilon, 1 - epsilon)
-        # Compute p_t: probability of the true class.
+
+        # 3) Match ndims by appending singleton dims to the end
+        if y_true.ndim < y_pred.ndim:
+            y_true = y_true.reshape(y_true.shape + (1,) * (y_pred.ndim - y_true.ndim))
+        elif y_pred.ndim < y_true.ndim:
+            y_pred = y_pred.reshape(y_pred.shape + (1,) * (y_true.ndim - y_pred.ndim))
+
+        # 4) Broadcast to identical shapes
+        try:
+            y_true, y_pred = jnp.broadcast_arrays(y_true, y_pred)
+        except ValueError as e:
+            raise ValueError(
+                f"Cannot align shapes y_true{y_true.shape} vs y_pred{y_pred.shape}"
+            ) from e
+
+        # 5) Clip predictions to avoid log(0)
+        eps = 1e-7
+        y_pred = jnp.clip(y_pred, eps, 1 - eps)
+
+        # 6) Compute p_t: model’s probability of the true class
         p_t = y_true * y_pred + (1 - y_true) * (1 - y_pred)
-        # Compute alpha factor: use alpha for positive and (1-alpha) for negative.
+
+        # 7) Alpha-balancing factor
         alpha_factor = y_true * self.alpha + (1 - y_true) * (1 - self.alpha)
-        # Compute the modulating factor.
+
+        # 8) Focal modulating factor
         focal_weight = alpha_factor * jnp.power(1 - p_t, self.gamma)
-        # Standard binary crossentropy.
+
+        # 9) Standard binary crossentropy
         ce_loss = - (y_true * jnp.log(y_pred) + (1 - y_true) * jnp.log(1 - y_pred))
-        # Apply the focal weight.
-        loss = focal_weight * ce_loss
-        return loss
+
+        # 10) Apply focal weight
+        return focal_weight * ce_loss
 
 
 

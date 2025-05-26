@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING as _TYPE_CHECKING
 try:
     __version__: str = _metadata.version("jaxflow")
 except _metadata.PackageNotFoundError:  # editable install
-    __version__ = "0.1.4.dev0"
+    __version__ = "0.1.5.dev0"
 
 # Clean up namespace
 del _metadata

@@ -4,11 +4,84 @@ from jaxflow.layers.layer import Layer
 from jaxflow.initializers.initializers import GlorotUniform, Zeros
 
 class Conv1D(Layer):
-    """1‑D convolution layer for **jaxflow**.
+    """
+    1D convolution layer for temporal data in JAXFlow.
 
-    This follows the same conventions as `Conv2D` (NHWC layout, lazily‑built
-    `Variable`s, functional API, grouped convolution support) but for temporal
-    data shaped *(batch, length, channels)*.
+    This layer applies a 1-dimensional convolution over an input signal
+    composed of several input channels. It supports grouped convolutions,
+    lazy variable creation, flexible device placement, and is compatible 
+    with pure-functional and object-oriented APIs.
+
+    The expected input data format is `(batch, length, channels)` (NWC).
+    Convolution is performed over the 'length' axis. Output shape and device
+    placement are handled automatically. API is similar to Keras and 
+    TensorFlow's `Conv1D`, but optimized for JAX workflows.
+
+    Args:
+        filters (int): Number of output channels.
+        kernel_size (int): Length of the 1D convolution window.
+        strides (int, optional): Stride of the convolution. Defaults to 1.
+        padding (str, optional): One of 'SAME' or 'VALID'. Defaults to 'SAME'.
+        dilation (int, optional): Dilation rate for dilated convolution. Defaults to 1.
+        groups (int, optional): Number of groups for grouped convolution. 
+            `in_channels` must be divisible by `groups`. Defaults to 1.
+        name (str, optional): Name for the layer. If None, a unique name is generated.
+        device (str, optional): Device for kernel/bias placement ('auto', 'cpu', 'gpu', 'tpu'). Defaults to 'auto'.
+        shard_devices (list or str, optional): Devices for sharding the kernel/bias. See Variable docs.
+        dtype (jax.numpy.dtype, optional): Data type of the variables. Defaults to float32.
+        trainable (bool, optional): Whether the layer's parameters are trainable. Defaults to True.
+        activation (callable, optional): Activation function to use. If None, no activation is applied.
+        use_bias (bool, optional): Whether to add a bias. Defaults to True.
+        kernel_initializer (callable, optional): Initializer for the convolution kernel.
+            Defaults to `GlorotUniform`.
+        bias_initializer (callable, optional): Initializer for the bias vector.
+            Defaults to `Zeros`.
+        kernel_regularizer (callable, optional): Optional kernel regularizer.
+        bias_regularizer (callable, optional): Optional bias regularizer.
+        activity_regularizer (callable, optional): Optional activity regularizer.
+        kernel_constraint (callable, optional): Optional kernel constraint.
+        bias_constraint (callable, optional): Optional bias constraint.
+        seed (int, optional): Random seed for initialization.
+
+    Inputs:
+        inputs (jnp.ndarray): 3D tensor of shape `(batch_size, length, channels)`.
+
+    Input shape:
+        (batch_size, length, in_channels)
+
+    Output shape:
+        (batch_size, new_length, filters)
+        where `new_length` depends on `padding`, `kernel_size`, `strides`, and `dilation`.
+
+    Attributes:
+        filters (int): Number of output channels.
+        kernel_size (int): Length of the 1D convolution window.
+        strides (int): Stride of the convolution.
+        padding (str): Padding method.
+        dilation (int): Dilation rate.
+        groups (int): Number of groups for grouped convolution.
+        use_bias (bool): Whether a bias is used.
+        kernel (Variable): Convolution kernel variable.
+        bias (Variable): Bias variable, if `use_bias` is True.
+        device (str): Device string for placement.
+        shard_devices (list or str): Devices for sharding.
+        dtype (jax.numpy.dtype): Data type of the kernel and bias.
+        activation (callable): Activation function.
+        built (bool): Whether the layer has been built.
+
+    Example:
+        ```python
+        import jax
+        import jax.numpy as jnp
+        from jaxflow.layers.conv1d import Conv1D
+
+        # Example input: batch of 4, sequence length 100, 16 channels
+        x = jnp.ones((4, 100, 16))
+        # Create Conv1D layer: 32 output filters, kernel size 3, stride 2, ReLU activation
+        conv = Conv1D(32, 3, strides=2, activation=jax.nn.relu)
+        y = conv(x)  # triggers build, runs convolution
+        print(y.shape)  # (4, 50, 32)
+        ```
     """
 
     def __init__(

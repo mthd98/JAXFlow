@@ -6,28 +6,67 @@ from jaxflow.layers.layer import Layer
 
 
 class MaxPooling2D(Layer):
-    """Max‑Pooling layer for 2‑D feature maps (**NHWC** tensors).
-
-    Args
-    -----
-    pool_size : int | tuple[int, int]
-        Window height/width. If an int is given the same value is used for both
-        spatial dims.
-    strides : int | tuple[int, int] | None
-        Stride for the pooling window. If ``None`` it defaults to ``pool_size``.
-    padding : str | tuple[tuple[int, int], tuple[int, int]]
-        ``"VALID"`` or ``"SAME"`` (upper‑case, as expected by ``jax.lax``), or
-        an explicit padding configuration ``((pad_h_lo, pad_h_hi), (pad_w_lo, pad_w_hi))``.
-    dilation : int | tuple[int, int]
-        Dilation of the pooling window.  Rarely used but kept for parity with
-        Keras / PyTorch. Defaults to ``1``.
-    keepdims : bool
-        If *True*, retains singleton spatial dims in the output, yielding
-        ``(N, 1, 1, C)`` instead of ``(N, C)`` when the input height/width equal
-        the pool size.  (Default: *False* – no extra dims.)
-    name : str | None
-        Layer name.
     """
+    Max pooling 2D layer for NHWC tensors in JAXFlow.
+
+    Applies 2D max pooling over the height and width dimensions of 4D input tensors.
+    Follows Keras semantics for pool_size and strides; supports both string padding
+    ("VALID"/"SAME") and explicit tuple-based padding. No trainable parameters.
+
+    Args:
+        pool_size (int or tuple of int, optional): Size of the pooling window for each spatial dimension.
+            If int, the same value is used for both height and width. Defaults to 2.
+        strides (int or tuple of int or None, optional): Stride for the pooling window.
+            If None, defaults to pool_size.
+        padding (str or tuple, optional): Padding method: "VALID", "SAME", or
+            explicit ((pad_h_lo, pad_h_hi), (pad_w_lo, pad_w_hi)). Defaults to "VALID".
+        dilation (int or tuple of int, optional): Dilation rate for the pooling window.
+            Rarely used, but supported for compatibility. Defaults to 1.
+        keepdims (bool, optional): If True, retains singleton spatial dimensions in the output,
+            so the output shape is (batch, 1, 1, channels) if the reduced dims are 1.
+            Defaults to False.
+        name (str or None, optional): Layer name. If None, a unique name is generated.
+
+    Inputs:
+        inputs (jnp.ndarray): 4D tensor of shape (batch, height, width, channels).
+
+    Input shape:
+        (batch_size, height, width, channels)
+
+    Output shape:
+        (batch_size, out_height, out_width, channels) if keepdims=False (default);
+        (batch_size, 1, 1, channels) if keepdims=True and reduced dims are size 1.
+
+    Attributes:
+        pool_size (tuple): Size of the pooling window.
+        strides (tuple): Stride for the pooling window.
+        padding (str or tuple): Padding strategy.
+        dilation (tuple): Dilation rate for the pooling window.
+        keepdims (bool): Whether singleton spatial dims are kept in output.
+        built (bool): Whether the layer has been built.
+
+    Example:
+        ```python
+        import jax.numpy as jnp
+        from jaxflow.layers.pooling import MaxPooling2D
+
+        # Example input: batch of 2, height=8, width=8, 3 channels
+        x = jnp.arange(2 * 8 * 8 * 3).reshape(2, 8, 8, 3)
+        pool = MaxPooling2D(pool_size=2, strides=2, padding="SAME")
+        y = pool(x)
+        print(y.shape)  # (2, 4, 4, 3)
+        ```
+
+    Raises:
+        ValueError: If input is not a 4D tensor.
+
+    Note:
+        - No trainable parameters.
+        - Pooling is performed over height and width (axes 1 and 2).
+        - Supports both string and explicit tuple padding.
+        - Keras/PyTorch-compatible API.
+    """
+
 
     def __init__(
         self,

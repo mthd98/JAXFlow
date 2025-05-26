@@ -1,44 +1,101 @@
+# jaxflow/layers/lstm.py
+from __future__ import annotations
+
 import jax
 import jax.numpy as jnp
 from jax import lax
+
 from jaxflow.layers.layer import Layer
-from jaxflow.initializers.initializers import GlorotUniform, Orthogonal, Zeros
+from jaxflow.initializers import GlorotUniform, Orthogonal, Zeros
+
 
 class LSTM(Layer):
-    """Long‑Short Term Memory layer for **jaxflow** (Elman‑style sequence‑first).
+    """
+    Long Short-Term Memory (LSTM) layer for JAXFlow.
 
-    Input shape: *(batch, timesteps, features)* ➜ Output shape depends on
-    `return_sequences`:
+    Implements a standard LSTM recurrent layer, which learns long-range dependencies
+    by using gates to control the flow of information. Follows Keras/PyTorch semantics
+    for initialization, call signature, and output options.
 
-    * `False`: *(batch, units)* (last hidden state)
-    * `True`:  *(batch, timesteps, units)* (full sequence)
+    Args:
+        units (int): Dimensionality of the output space (number of hidden units).
+        activation (callable, optional): Activation function for the candidate cell state.
+            Defaults to jax.nn.tanh.
+        recurrent_activation (callable, optional): Activation function for the gates.
+            Defaults to jax.nn.sigmoid.
+        use_bias (bool, optional): Whether the layer uses a bias vector. Defaults to True.
+        return_sequences (bool, optional): If True, returns the full sequence of outputs
+            (batch, time, units). If False (default), returns only the last output (batch, units).
+        return_state (bool, optional): If True, returns a tuple (output, (last_hidden, last_cell)).
+        kernel_initializer (callable or Initializer, optional): Initializer for input kernel weights.
+            Defaults to GlorotUniform.
+        recurrent_initializer (callable or Initializer, optional): Initializer for recurrent kernel weights.
+            Defaults to Orthogonal.
+        bias_initializer (callable or Initializer, optional): Initializer for bias vectors.
+            Defaults to Zeros.
+        device (str, optional): Device for parameter placement ("auto", "cpu", "gpu", "tpu"). Defaults to "auto".
+        shard_devices (list or str, optional): Devices for parameter sharding. See Variable docs.
+        dtype (jnp.dtype, optional): Data type for parameters. Defaults to jnp.float32.
+        seed (int, optional): Random seed for parameter initialization.
+        name (str, optional): Layer name. If None, a unique name is generated.
+        trainable (bool, optional): Whether the parameters are trainable. Defaults to True.
 
-    Parameters
-    ----------
-    units : int
-        Dimensionality of the hidden state *h_t* / cell state *c_t*.
-    activation : callable, default ``jax.nn.tanh``
-        Activation used for candidate cell (*g*) & output modulation.
-    recurrent_activation : callable, default ``jax.nn.sigmoid``
-        Activation for gates (input, forget, output).
-    use_bias : bool, default ``True``
-        If ``True`` add learned bias to the linear transformations.
-    return_sequences : bool, default ``False``
-        Whether to return the full sequence or only the last hidden state.
-    return_state : bool, default ``False``
-        If ``True`` also return the final ``(h_T, c_T)`` tuple.
-    kernel_initializer, recurrent_initializer, bias_initializer : Initializer
-        classes / callables accepting ``seed`` & ``dtype``.
-    dtype : jnp.dtype, default ``jnp.float32``.
-    seed : int | None
-        Base RNG seed; if ``None`` choose randomly.
+    Inputs:
+        inputs (jnp.ndarray): 3D tensor of shape (batch, time, features).
+        initial_state (tuple of jnp.ndarray, optional): Initial hidden and cell states, each of shape (batch, units).
+        mask (jnp.ndarray, optional): Boolean tensor with shape (batch, time), for masking input steps.
+
+    Input shape:
+        (batch_size, time_steps, features)
+
+    Output shape:
+        (batch_size, units) if return_sequences=False (default)
+        (batch_size, time_steps, units) if return_sequences=True
+
+        If return_state=True, returns a tuple: (output, (last_hidden_state, last_cell_state))
+
+    Attributes:
+        units (int): Dimensionality of the output space.
+        activation (callable): Activation for candidate state.
+        recurrent_activation (callable): Activation for gates.
+        use_bias (bool): Whether bias is used.
+        return_sequences (bool): Whether to return the full output sequence.
+        return_state (bool): Whether to return the last hidden and cell states.
+        kernel (Variable): Input kernel weights.
+        recurrent_kernel (Variable): Recurrent kernel weights.
+        bias (Variable): Bias vector (if use_bias is True).
+        built (bool): Whether the layer has been built.
+
+    Example:
+        ```python
+        import jax
+        import jax.numpy as jnp
+        from jaxflow.layers.lstm import LSTM
+
+        # Example input: batch of 8, sequence length 20, feature size 32
+        x = jnp.ones((8, 20, 32))
+        lstm = LSTM(units=16, return_sequences=True)
+        y = lstm(x)  # (8, 20, 16)
+        ```
+
+    Raises:
+        ValueError: If input shape does not match (batch, time, features).
+
+    Note:
+        - No explicit stateful mode; for stateful inference, manage initial_state manually.
+        - Input and recurrent kernel matrices are concatenated internally for efficiency ([i, f, g, o] gates).
+        - Compatible with JAX JIT/vmap/pmap for efficient batching and functional API usage.
     """
 
+
+    # ------------------------------------------------------------------ #
+    # Construction
+    # ------------------------------------------------------------------ #
     def __init__(
         self,
         units: int,
         *,
-        name=None,
+        name: str | None = None,
         trainable: bool = True,
         activation=jax.nn.tanh,
         recurrent_activation=jax.nn.sigmoid,
@@ -54,178 +111,200 @@ class LSTM(Layer):
         seed=None,
     ):
         super().__init__(name=name, trainable=trainable)
-        self.units = units
+
+        # Public config
+        self.units = int(units)
         self.activation = activation
         self.recurrent_activation = recurrent_activation
-        self.use_bias = use_bias
-        self.return_sequences = return_sequences
-        self.return_state = return_state
+        self.use_bias = bool(use_bias)
+        self.return_sequences = bool(return_sequences)
+        self.return_state = bool(return_state)
 
-        # Default initializers
+        # Initialisers
         kernel_initializer = kernel_initializer or GlorotUniform
         recurrent_initializer = recurrent_initializer or Orthogonal
         bias_initializer = bias_initializer or Zeros
 
-        self.kernel_initializer = kernel_initializer(seed=seed, dtype=dtype) if callable(kernel_initializer) else kernel_initializer
-        self.recurrent_initializer = (
-            recurrent_initializer(seed=seed, dtype=dtype) if callable(recurrent_initializer) else recurrent_initializer
+        self.kernel_init = kernel_initializer(seed=seed, dtype=dtype) if callable(
+            kernel_initializer
+        ) else kernel_initializer
+        self.recurrent_init = (
+            recurrent_initializer(seed=seed, dtype=dtype)
+            if callable(recurrent_initializer)
+            else recurrent_initializer
         )
-        self.bias_initializer = bias_initializer(seed=seed, dtype=dtype) if callable(bias_initializer) else bias_initializer
+        self.bias_init = bias_initializer(seed=seed, dtype=dtype) if callable(
+            bias_initializer
+        ) else bias_initializer
 
+        # Misc
         self.device = device
         self.shard_devices = shard_devices
         self.dtype = dtype
         self.seed = seed
 
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------ #
     # Build
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------ #
     def build(self, input_shape):
         if len(input_shape) != 3:
-            raise ValueError("LSTM expects (batch, time, features) inputs. Got shape %s" % (input_shape,))
-        features = input_shape[-1]
-
-        # kernels: (features, 4 * units) and (units, 4 * units)
-        k_shape = (features, 4 * self.units)
-        rk_shape = (self.units, 4 * self.units)
+            raise ValueError("LSTM expects (batch, time, features) inputs.")
+        _, _, in_features = input_shape
 
         self.kernel = self.add_variable(
             "kernel",
-            initial_value=self.kernel_initializer(shape=k_shape),
+            initial_value=self.kernel_init(shape=(in_features, 4 * self.units)),
             device=self.device,
             shard_devices=self.shard_devices,
             dtype=self.dtype,
             trainable=self.trainable,
         )
-
         self.recurrent_kernel = self.add_variable(
             "recurrent_kernel",
-            initial_value=self.recurrent_initializer(shape=rk_shape),
+            initial_value=self.recurrent_init(shape=(self.units, 4 * self.units)),
             device=self.device,
             shard_devices=self.shard_devices,
             dtype=self.dtype,
             trainable=self.trainable,
         )
-
         if self.use_bias:
             self.bias = self.add_variable(
                 "bias",
-                initial_value=self.bias_initializer(shape=(4 * self.units,)),
+                initial_value=self.bias_init(shape=(4 * self.units,)),
                 device=self.device,
                 shard_devices=self.shard_devices,
                 dtype=self.dtype,
                 trainable=self.trainable,
             )
 
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------ #
     # Forward
-    # ------------------------------------------------------------------
-    def _step(self, carry, x_t):
-        """Single‑timestep update used by `lax.scan`.``carry`` = (h, c)."""
-        h_prev, c_prev = carry
-        z = x_t @ self.kernel + h_prev @ self.recurrent_kernel
-        if self.use_bias:
-            z = z + self.bias
-        i, f, g, o = jnp.split(z, 4, axis=-1)
-        i = self.recurrent_activation(i)
-        f = self.recurrent_activation(f)
-        o = self.recurrent_activation(o)
-        g = self.activation(g)
-        c = f * c_prev + i * g
-        h = o * self.activation(c)
-        return (h, c), h
+    # ------------------------------------------------------------------ #
+    def call(
+        self,
+        inputs,
+        *,
+        training: bool = False,
+        mask=None,
+        initial_state=None,
+    ):
+        if inputs.ndim != 3:
+            raise ValueError("LSTM expects 3-D inputs (batch, time, features).")
+        if mask is not None:
+            inputs = jnp.where(mask[..., None], inputs, 0.0)
 
-    def call(self, inputs, training=False, mask=None, initial_state=None):
-        # inputs: (batch, time, features)
+        # Capture raw arrays once
+        K = self.kernel.value
+        R = self.recurrent_kernel.value
+        B = self.bias.value if self.use_bias else None
+        (W_i, W_f, W_g, W_o) = jnp.split(K, 4, axis=1)
+        (U_i, U_f, U_g, U_o) = jnp.split(R, 4, axis=1)
+        if B is not None:
+            b_i, b_f, b_g, b_o = jnp.split(B, 4)
+        else:
+            b_i = b_f = b_g = b_o = 0.0
+
         batch_size = inputs.shape[0]
         if initial_state is None:
             h0 = jnp.zeros((batch_size, self.units), dtype=self.dtype)
             c0 = jnp.zeros((batch_size, self.units), dtype=self.dtype)
         else:
             h0, c0 = initial_state
-        (h_final, c_final), h_seq = lax.scan(self._step, (h0, c0), inputs.swapaxes(0, 1))
-        h_seq = h_seq.swapaxes(0, 1)  # back to (batch, time, units)
 
-        if self.return_sequences and self.return_state:
-            return h_seq, (h_final, c_final)
-        elif self.return_sequences:
-            return h_seq
-        elif self.return_state:
-            return h_final, (h_final, c_final)
-        else:
-            return h_final
-
-    # ------------------------------------------------------------------
-    # Functional
-    # ------------------------------------------------------------------
-    def functional_call(self, inputs, params, *, initial_state=None, training=False, mask=None):
-        kernel = params["kernel"]
-        recurrent_kernel = params["recurrent_kernel"]
-        bias = params.get("bias", None)
+        inputs_T = jnp.swapaxes(inputs, 0, 1)  # (time, batch, feat)
 
         def step(carry, x_t):
             h_prev, c_prev = carry
-            z = x_t @ kernel + h_prev @ recurrent_kernel
-            if bias is not None:
-                z = z + bias
-            i, f, g, o = jnp.split(z, 4, axis=-1)
-            i = self.recurrent_activation(i)
-            f = self.recurrent_activation(f)
-            o = self.recurrent_activation(o)
-            g = self.activation(g)
+            i = self.recurrent_activation(x_t @ W_i + h_prev @ U_i + b_i)
+            f = self.recurrent_activation(x_t @ W_f + h_prev @ U_f + b_f)
+            o = self.recurrent_activation(x_t @ W_o + h_prev @ U_o + b_o)
+            g = self.activation(x_t @ W_g + h_prev @ U_g + b_g)
             c = f * c_prev + i * g
             h = o * self.activation(c)
             return (h, c), h
 
+        (h_last, c_last), h_all = lax.scan(step, (h0, c0), inputs_T)
+        outputs = jnp.swapaxes(h_all, 0, 1)  # (batch, time, units)
+
+        main = outputs if self.return_sequences else h_last
+        if self.return_state:
+            return (main, (h_last, c_last))
+        return main
+
+    # ------------------------------------------------------------------ #
+    # Pure functional variant
+    # ------------------------------------------------------------------ #
+    def functional_call(
+        self,
+        inputs,
+        params,
+        *,
+        training: bool = False,
+        mask=None,
+        initial_state=None,
+    ):
+        if mask is not None:
+            inputs = jnp.where(mask[..., None], inputs, 0.0)
+
+        K = params["kernel"]
+        R = params["recurrent_kernel"]
+        B = params.get("bias", None)
+        (W_i, W_f, W_g, W_o) = jnp.split(K, 4, axis=1)
+        (U_i, U_f, U_g, U_o) = jnp.split(R, 4, axis=1)
+        if B is not None:
+            b_i, b_f, b_g, b_o = jnp.split(B, 4)
+        else:
+            b_i = b_f = b_g = b_o = 0.0
+
         batch_size = inputs.shape[0]
         if initial_state is None:
-            h0 = jnp.zeros((batch_size, self.units), dtype=self.dtype)
-            c0 = jnp.zeros((batch_size, self.units), dtype=self.dtype)
+            h0 = jnp.zeros((batch_size, self.units), dtype=inputs.dtype)
+            c0 = jnp.zeros((batch_size, self.units), dtype=inputs.dtype)
         else:
             h0, c0 = initial_state
 
-        (h_final, c_final), h_seq = lax.scan(step, (h0, c0), inputs.swapaxes(0, 1))
-        h_seq = h_seq.swapaxes(0, 1)
+        inputs_T = jnp.swapaxes(inputs, 0, 1)
 
-        if self.return_sequences and self.return_state:
-            return h_seq, (h_final, c_final)
-        elif self.return_sequences:
-            return h_seq
-        elif self.return_state:
-            return h_final, (h_final, c_final)
-        else:
-            return h_final
+        def step(carry, x_t):
+            h_prev, c_prev = carry
+            i = self.recurrent_activation(x_t @ W_i + h_prev @ U_i + b_i)
+            f = self.recurrent_activation(x_t @ W_f + h_prev @ U_f + b_f)
+            o = self.recurrent_activation(x_t @ W_o + h_prev @ U_o + b_o)
+            g = self.activation(x_t @ W_g + h_prev @ U_g + b_g)
+            c = f * c_prev + i * g
+            h = o * self.activation(c)
+            return (h, c), h
 
-    # ------------------------------------------------------------------
-    # Helpers / metadata
-    # ------------------------------------------------------------------
+        (h_last, c_last), h_all = lax.scan(step, (h0, c0), inputs_T)
+        outputs = jnp.swapaxes(h_all, 0, 1)
+        main = outputs if self.return_sequences else h_last
+        if self.return_state:
+            return (main, (h_last, c_last))
+        return main
+
+    # ------------------------------------------------------------------ #
+    # Metadata helpers
+    # ------------------------------------------------------------------ #
     def compute_output_shape(self, input_shape):
-        if self.return_sequences:
-            return (input_shape[0], input_shape[1], self.units)
-        return (input_shape[0], self.units)
+        b, t, _ = input_shape
+        main = (b, t, self.units) if self.return_sequences else (b, self.units)
+        return (main, (b, self.units)) if self.return_state else main
 
     def get_config(self):
-        base = super().get_config()
-        base.update(
-            {
-                "units": self.units,
-                "return_sequences": self.return_sequences,
-                "return_state": self.return_state,
-                "use_bias": self.use_bias,
-            }
+        cfg = super().get_config()
+        cfg.update(
+            dict(
+                units=self.units,
+                use_bias=self.use_bias,
+                return_sequences=self.return_sequences,
+                return_state=self.return_state,
+            )
         )
-        return base
+        return cfg
 
     def __repr__(self):
-        cfg = self.get_config()
         return (
-            f"<LSTM units={cfg['units']}, return_sequences={cfg['return_sequences']}, "
+            f"<LSTM units={self.units}, "
+            f"return_sequences={self.return_sequences}, "
             f"built={self.built}>"
         )
-
-
-#test
-lstm = LSTM(units=10, return_sequences=False)
-lstm.build((None, None, 5))
-x = jnp.ones((2, 3, 5))
-lstm(x).shape

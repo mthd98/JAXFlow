@@ -13,9 +13,75 @@ from jaxflow.core.auto_name import AutoNameMixin
 
 class Metric(AutoNameMixin):
     """
-    Base Metric class. Subclass to implement custom metrics by overriding
-    update_state() and result(). State variables created via add_variable().
+    Base Metric class for JAXFlow.
+
+    Implements a lightweight, Keras-inspired API for stateful or stateless metrics
+    in JAXFlow. Subclass this and override `update_state()` and `result()` to
+    create custom metrics.
+
+    Args:
+        name (str, optional): Name for the metric instance. If None, a unique name is auto-generated.
+        dtype (jnp.dtype, optional): Data type used for computations and variables. Defaults to jnp.float32.
+
+    Inputs:
+        The expected inputs to `update_state()` and `__call__()` depend on the specific metric subclass.
+        Most metrics expect `y_true`, `y_pred`, and optionally `sample_weight` or other arguments.
+
+    Attributes:
+        name (str): Name for the metric instance.
+        dtype (jnp.dtype): Data type for all computations.
+        variables (list[Variable]): List of all internal state variables used to accumulate statistics.
+
+    Methods:
+        update_state(...): Accumulate statistics for the metric. Must be implemented by subclasses.
+        result(): Compute and return the current metric value. Must be implemented by subclasses.
+        reset_state(): Reset all metric state variables to zero.
+        stateless_update_state(metric_vars, ...): Functional/stateless update (see Notes).
+        stateless_result(metric_vars): Functional/stateless result computation (see Notes).
+        get_config(): Return a serializable config dictionary for this metric.
+        from_config(config): Re-create the metric from a config dict.
+
+    Usage Example:
+        ```python
+        class MeanMetric(Metric):
+            def __init__(self, name=None, dtype=None):
+                super().__init__(name=name, dtype=dtype)
+                self.total = self.add_variable("total", shape=())
+                self.count = self.add_variable("count", shape=())
+
+            def update_state(self, values):
+                self.total.assign(self.total.value + jnp.sum(values))
+                self.count.assign(self.count.value + values.size)
+
+            def result(self):
+                return self.total.value / (self.count.value + 1e-7)
+
+        metric = MeanMetric()
+        metric.update_state(jnp.array([1, 2, 3]))
+        print(metric.result())  # Output: 2.0
+        metric.reset_state()
+        ```
+
+    Notes:
+        - All metric state is stored in non-trainable `Variable` instances.
+        - Metrics can be used statefully (default) or functionally/statelessly via
+          `stateless_update_state` and `stateless_result`.
+        - Subclasses **must** call `super().__init__()` and implement both
+          `update_state()` and `result()`.
+        - `reset_state()` sets all internal state variables to zero.
+        - The `variables` property returns a list of all stateful `Variable` objects.
+        - Metrics are compatible with JAX transformations (jit/vmap/pmap) via stateless helpers.
+
+    Raises:
+        RuntimeError: If `super().__init__()` was not called in a subclass.
+        NotImplementedError: If `update_state()` or `result()` are not implemented in a subclass.
+        ValueError: For mismatched variable array lengths in stateless helpers.
+
+    See Also:
+        - Keras Metric base class: https://keras.io/api/metrics/
+        - JAXFlow Variable: `jaxflow.core.variable.Variable`
     """
+
     def __init__(self, name: Optional[str] = None, dtype: Any = None):
         # Required attributes
         self.name = self.auto_name(name)

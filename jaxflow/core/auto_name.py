@@ -7,13 +7,45 @@ from typing import Optional, Dict
 
 class AutoNameMixin:
     """
-    Re-usable “give-me-a-unique-name” helper.
+    Mixin for automatic, collision-free name generation across subclasses.
 
-    • Works across *all* subclasses that mix it in.
-    • Counter is global per concrete class (Layer, Conv2D, Adam …).
-    • Thread-safe: JAX async dispatch or dataloader threads won’t step
-      on each other.
+    `AutoNameMixin` provides a reusable mechanism for generating unique, 
+    class-scoped names for all objects that inherit from it. It is thread-safe 
+    and ensures that each instance receives a unique name, even in parallel or 
+    asynchronous environments.
+
+    Key Features:
+        - Globally unique auto-naming across all subclasses (e.g., Layer, Optimizer).
+        - Class-level counters to ensure names like `Layer_1`, `Layer_2`, etc.
+        - Thread-safe implementation using a global lock.
+        - Counter reset utility for unit tests and notebook sessions.
+
+    Methods:
+        auto_name(provided: Optional[str] = None) -> str:
+            Returns the provided name if not None, else generates a unique
+            name in the format `<ClassName>_<N>`.
+
+        reset_all_counters():
+            Class method. Resets all internal counters. Useful for unit
+            tests or interactive notebook restarts.
+
+    Example:
+        >>> class CustomObject(AutoNameMixin):
+        ...     def __init__(self, name=None):
+        ...         self.name = self.auto_name(name)
+        ...
+        >>> a = CustomObject()
+        >>> b = CustomObject()
+        >>> c = CustomObject(name="special")
+        >>> print(a.name)  # CustomObject_1
+        >>> print(b.name)  # CustomObject_2
+        >>> print(c.name)  # special
+
+    Attributes:
+        _counters (Dict[str, int]): Class-level counters for name suffixes.
+        _lock (Lock): Class-level lock for thread safety.
     """
+
 
     _counters: Dict[str, int] = defaultdict(int)
     _lock: Lock = Lock()
